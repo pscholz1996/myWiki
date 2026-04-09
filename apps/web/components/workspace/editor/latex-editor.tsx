@@ -30,9 +30,7 @@ import { latex } from "codemirror-lang-latex";
 import { useDocumentStore, type ProjectFile } from "@/stores/document-store";
 import { compileLatex, type CompileResource } from "@/lib/latex-compiler";
 import { EditorToolbar } from "./editor-toolbar";
-import { AIDrawer } from "./ai-drawer";
 import { ImagePreview } from "./image-preview";
-import { LatexTools } from "./latex-tools";
 import { SearchPanel } from "./search-panel";
 
 interface StickyItem {
@@ -520,7 +518,6 @@ export function LatexEditor() {
         />
         <div className="relative min-h-0 flex-1 overflow-hidden">
           <ImagePreview file={activeFile} scale={imageScale} />
-          <AIDrawer />
         </div>
       </div>
     );
@@ -585,9 +582,7 @@ export function LatexEditor() {
           </div>
         )}
         <div ref={containerRef} className="absolute inset-0" />
-        <AIDrawer />
       </div>
-      <LatexTools />
     </div>
   );
 }

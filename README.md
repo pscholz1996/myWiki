@@ -6,7 +6,6 @@ Open-source AI-powered LaTeX writing workspace with live preview.
 
 ## Features
 
-- **AI-Assisted Writing** - Powered by assistant-ui for intelligent LaTeX assistance
 - **Live PDF Preview** - Real-time compilation and preview of your documents
 - **CodeMirror Editor** - Syntax highlighting and LaTeX language support
 - **Local Storage** - Documents saved in browser IndexedDB
@@ -15,25 +14,21 @@ Open-source AI-powered LaTeX writing workspace with live preview.
 ## Quick Start
 
 ```bash
-# Clone the repository
-git clone https://github.com/assistant-ui/open-prism.git
-cd open-prism
-
 # Install dependencies
 pnpm install
 
-# Copy environment variables
+# Configure environment
 cp apps/web/.env.example apps/web/.env.local
+# Edit apps/web/.env.local — set PROJECT_DIR to the directory of your LaTeX project.
 
-# Configure your environment variables in apps/web/.env.local
-# - OPENAI_API_KEY: Your OpenAI API key
-# - LATEX_API_URL: URL to the LaTeX compilation service
-# - KV_REST_API_URL: KV REST API URL (for rate limiting)
-# - KV_REST_API_TOKEN: KV REST API token
+# Start the LaTeX compiler service (in one terminal)
+cd apps/latex-api && docker build -t latex-api . && docker run -p 3001:3001 latex-api
 
-# Start development server
+# Start the editor (in another terminal)
 pnpm dev:web
 ```
+
+Open http://localhost:3000 in a browser. Keep VS Code open on the same `PROJECT_DIR` — edits in either side flow to the other via filesystem watching.
 
 ## Project Structure
 
@@ -61,26 +56,6 @@ Hono-based API for LaTeX compilation:
 - Accepts LaTeX source code
 - Compiles using TeX Live (pdflatex)
 - Returns compiled PDF
-
-## Deployment
-
-### Web App (Vercel)
-
-1. Import the repository to Vercel
-2. Set root directory to `apps/web`
-3. Configure environment variables:
-   - `OPENAI_API_KEY`
-   - `LATEX_API_URL`
-   - `KV_REST_API_URL`
-   - `KV_REST_API_TOKEN`
-
-### LaTeX API (Docker)
-
-```bash
-cd apps/latex-api
-docker build -t open-prism-latex-api .
-docker run -p 3001:3001 open-prism-latex-api
-```
 
 ## Contributing
 

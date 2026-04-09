@@ -15,7 +15,7 @@ import {
   MinusIcon,
   PlusIcon,
 } from "lucide-react";
-import { TooltipIconButton } from "@/components/assistant-ui/tooltip-icon-button";
+import { TooltipIconButton } from "@/components/ui/tooltip-icon-button";
 import { Button } from "@/components/ui/button";
 import {
   Select,
