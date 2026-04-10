@@ -1,10 +1,16 @@
 "use client";
 
 import { ImageIcon } from "lucide-react";
-import type { ProjectFile } from "@/stores/document-store";
+
+interface ImageFile {
+  id: string;
+  name: string;
+  type: string;
+  dataUrl?: string;
+}
 
 interface ImagePreviewProps {
-  file: ProjectFile;
+  file: ImageFile;
   scale: number;
 }
 

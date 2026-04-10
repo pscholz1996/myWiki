@@ -1,23 +1,13 @@
 "use client";
 
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
-import { Sidebar } from "./sidebar";
+import { Sidebar } from "./sidebar/sidebar";
 import { LatexEditor } from "./editor/latex-editor";
 import { PdfPreview } from "./preview/pdf-preview";
-import { useProjectInit } from "@/hooks/use-project-init";
-import { useStorageReady } from "@/hooks/use-storage-ready";
+import { useFsStartup } from "@/hooks/use-fs-startup";
 
 export function WorkspaceLayout() {
-  const storageReady = useStorageReady();
-  useProjectInit();
-
-  if (!storageReady) {
-    return (
-      <div className="flex h-full items-center justify-center">
-        <div className="text-muted-foreground">Loading...</div>
-      </div>
-    );
-  }
+  useFsStartup();
 
   return (
     <PanelGroup direction="horizontal" className="h-full">
