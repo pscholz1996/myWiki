@@ -50,33 +50,56 @@ interface ParsedLine {
 function parseLatexStructure(content: string): ParsedLine[] {
   const lines = content.split("\n");
   const result: ParsedLine[] = [];
-  const sectionRegex = /\\(part|chapter|section|subsection|subsubsection)\*?\s*\{[^}]*\}/;
+  const sectionRegex =
+    /\\(part|chapter|section|subsection|subsubsection)\*?\s*\{[^}]*\}/;
   const beginRegex = /\\begin\{([^}]+)\}/;
   const endRegex = /\\end\{([^}]+)\}/;
 
   lines.forEach((lineContent, index) => {
     const sectionMatch = lineContent.match(sectionRegex);
     if (sectionMatch) {
-      result.push({ type: "section", name: sectionMatch[1], content: lineContent, line: index + 1 });
+      result.push({
+        type: "section",
+        name: sectionMatch[1],
+        content: lineContent,
+        line: index + 1,
+      });
       return;
     }
     const beginMatch = lineContent.match(beginRegex);
     if (beginMatch) {
-      result.push({ type: "begin", name: beginMatch[1], content: lineContent, line: index + 1 });
+      result.push({
+        type: "begin",
+        name: beginMatch[1],
+        content: lineContent,
+        line: index + 1,
+      });
       return;
     }
     const endMatch = lineContent.match(endRegex);
     if (endMatch) {
-      result.push({ type: "end", name: endMatch[1], content: lineContent, line: index + 1 });
+      result.push({
+        type: "end",
+        name: endMatch[1],
+        content: lineContent,
+        line: index + 1,
+      });
     }
   });
   return result;
 }
 
-function getStickyLines(parsedLines: ParsedLine[], currentLine: number): StickyItem[] {
+function getStickyLines(
+  parsedLines: ParsedLine[],
+  currentLine: number,
+): StickyItem[] {
   const stack: StickyItem[] = [];
   const sectionLevelMap: Record<string, number> = {
-    part: 0, chapter: 1, section: 2, subsection: 3, subsubsection: 4,
+    part: 0,
+    chapter: 1,
+    section: 2,
+    subsection: 3,
+    subsubsection: 4,
   };
 
   for (const item of parsedLines) {
@@ -90,9 +113,21 @@ function getStickyLines(parsedLines: ParsedLine[], currentLine: number): StickyI
       ) {
         stack.pop();
       }
-      stack.push({ type: "section", name: item.name, content: item.content, html: "", line: item.line });
+      stack.push({
+        type: "section",
+        name: item.name,
+        content: item.content,
+        html: "",
+        line: item.line,
+      });
     } else if (item.type === "begin") {
-      stack.push({ type: "begin", name: item.name, content: item.content, html: "", line: item.line });
+      stack.push({
+        type: "begin",
+        name: item.name,
+        content: item.content,
+        html: "",
+        line: item.line,
+      });
     } else if (item.type === "end") {
       for (let i = stack.length - 1; i >= 0; i--) {
         if (stack[i].type === "begin" && stack[i].name === item.name) {
@@ -121,7 +156,9 @@ export function LatexEditor() {
   const [imageScale, setImageScale] = useState(0.5);
   const [currentLine, setCurrentLine] = useState(1);
   const [gutterWidth, setGutterWidth] = useState(0);
-  const [lineHtmlCache, setLineHtmlCache] = useState<Record<number, string>>({});
+  const [lineHtmlCache, setLineHtmlCache] = useState<Record<number, string>>(
+    {},
+  );
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [matchCount, setMatchCount] = useState(0);
@@ -130,11 +167,16 @@ export function LatexEditor() {
   const parsedLines = useMemo(() => parseLatexStructure(buffer), [buffer]);
   const stickyLines = useMemo(() => {
     const items = getStickyLines(parsedLines, currentLine);
-    return items.map((item) => ({ ...item, html: lineHtmlCache[item.line] || "" }));
+    return items.map((item) => ({
+      ...item,
+      html: lineHtmlCache[item.line] || "",
+    }));
   }, [parsedLines, currentLine, lineHtmlCache]);
 
   const isSearchOpenRef = useRef(false);
-  useEffect(() => { isSearchOpenRef.current = isSearchOpen; }, [isSearchOpen]);
+  useEffect(() => {
+    isSearchOpenRef.current = isSearchOpen;
+  }, [isSearchOpen]);
 
   useEffect(() => {
     if (!searchQuery || !buffer) {
@@ -142,7 +184,10 @@ export function LatexEditor() {
       setCurrentMatch(0);
       return;
     }
-    const regex = new RegExp(searchQuery.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
+    const regex = new RegExp(
+      searchQuery.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+      "gi",
+    );
     const matches = buffer.match(regex);
     setMatchCount(matches?.length ?? 0);
     setCurrentMatch(matches && matches.length > 0 ? 1 : 0);
@@ -162,7 +207,11 @@ export function LatexEditor() {
   useEffect(() => {
     const view = viewRef.current;
     if (!view) return;
-    const query = new SearchQuery({ search: searchQuery, caseSensitive: false, literal: true });
+    const query = new SearchQuery({
+      search: searchQuery,
+      caseSensitive: false,
+      literal: true,
+    });
     view.dispatch({ effects: setSearchQueryEffect.of(query) });
     if (searchQuery) findNext(view);
   }, [searchQuery]);
@@ -202,7 +251,9 @@ export function LatexEditor() {
         const cmLines = view.dom.querySelectorAll(".cm-line");
         const newCache: Record<number, string> = {};
         cmLines.forEach((el) => {
-          const lineInfo = view.lineBlockAt(view.posAtDOM(el as HTMLElement, 0));
+          const lineInfo = view.lineBlockAt(
+            view.posAtDOM(el as HTMLElement, 0),
+          );
           const ln = view.state.doc.lineAt(lineInfo.from).number;
           newCache[ln] = el.innerHTML;
         });
@@ -234,7 +285,10 @@ export function LatexEditor() {
         },
         {
           key: "Mod-f",
-          run: () => { setIsSearchOpen(true); return true; },
+          run: () => {
+            setIsSearchOpen(true);
+            return true;
+          },
         },
         {
           key: "Escape",
@@ -271,7 +325,10 @@ export function LatexEditor() {
           "&": { height: "100%", fontSize: "14px" },
           ".cm-scroller": { overflow: "auto" },
           ".cm-gutters": { paddingRight: "4px" },
-          ".cm-lineNumbers .cm-gutterElement": { paddingLeft: "8px", paddingRight: "4px" },
+          ".cm-lineNumbers .cm-gutterElement": {
+            paddingLeft: "8px",
+            paddingRight: "4px",
+          },
           ".cm-content": { paddingLeft: "8px", paddingRight: "12px" },
           ".cm-searchMatch": {
             backgroundColor: "#facc15 !important",
@@ -345,7 +402,12 @@ export function LatexEditor() {
         <div className="relative min-h-0 flex-1 overflow-hidden">
           {activeDataUrl && (
             <ImagePreview
-              file={{ id: activePath, name: activePath, type: "image", dataUrl: activeDataUrl }}
+              file={{
+                id: activePath,
+                name: activePath,
+                type: "image",
+                dataUrl: activeDataUrl,
+              }}
               scale={imageScale}
             />
           )}
@@ -385,7 +447,9 @@ export function LatexEditor() {
                   const line = view.state.doc.line(section.line);
                   view.dispatch({
                     selection: { anchor: line.from },
-                    effects: EditorView.scrollIntoView(line.from, { y: "start" }),
+                    effects: EditorView.scrollIntoView(line.from, {
+                      y: "start",
+                    }),
                   });
                   view.focus();
                 }}
@@ -397,9 +461,14 @@ export function LatexEditor() {
                   {section.line}
                 </span>
                 {section.html ? (
-                  <span className="py-px pl-5.5" dangerouslySetInnerHTML={{ __html: section.html }} />
+                  <span
+                    className="py-px pl-5.5"
+                    dangerouslySetInnerHTML={{ __html: section.html }}
+                  />
                 ) : (
-                  <span className="py-px pl-5.5 text-[#abb2bf]">{section.content}</span>
+                  <span className="py-px pl-5.5 text-[#abb2bf]">
+                    {section.content}
+                  </span>
                 )}
               </div>
             ))}

@@ -12,7 +12,10 @@ export async function PUT(req: Request) {
     const url = new URL(req.url);
     const userPath = url.searchParams.get("path");
     if (!userPath) {
-      return NextResponse.json({ error: "Missing 'path' query parameter" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Missing 'path' query parameter" },
+        { status: 400 },
+      );
     }
 
     const projectDir = getProjectDir();
@@ -20,7 +23,10 @@ export async function PUT(req: Request) {
 
     const ext = path.extname(absPath).toLowerCase();
     if (!TEXT_EXTS.has(ext)) {
-      return NextResponse.json({ error: "Only text files can be written" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Only text files can be written" },
+        { status: 400 },
+      );
     }
 
     const body = await req.text();
@@ -37,7 +43,9 @@ export async function PUT(req: Request) {
     return NextResponse.json({ path: userPath, mtime: stat.mtimeMs });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
-    const code = /outside|absolute|empty|invalid|only text/i.test(message) ? 400 : 500;
+    const code = /outside|absolute|empty|invalid|only text/i.test(message)
+      ? 400
+      : 500;
     return NextResponse.json({ error: message }, { status: code });
   }
 }

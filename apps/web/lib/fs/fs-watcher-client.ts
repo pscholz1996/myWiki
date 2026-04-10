@@ -6,7 +6,9 @@ export interface FsEvent {
 }
 
 export type FsListener = (event: FsEvent) => void;
-export type StatusListener = (status: "connecting" | "connected" | "disconnected") => void;
+export type StatusListener = (
+  status: "connecting" | "connected" | "disconnected",
+) => void;
 
 const RECONNECT_DELAYS_MS = [1000, 2000, 5000, 5000];
 
@@ -47,7 +49,8 @@ export function startFsWatcher(
       source?.close();
       source = null;
       onStatus?.("disconnected");
-      const delay = RECONNECT_DELAYS_MS[Math.min(attempt, RECONNECT_DELAYS_MS.length - 1)];
+      const delay =
+        RECONNECT_DELAYS_MS[Math.min(attempt, RECONNECT_DELAYS_MS.length - 1)];
       attempt += 1;
       reconnectTimer = setTimeout(connect, delay);
     };

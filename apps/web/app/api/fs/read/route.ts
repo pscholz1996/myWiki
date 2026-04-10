@@ -11,7 +11,10 @@ export async function GET(req: Request) {
     const url = new URL(req.url);
     const userPath = url.searchParams.get("path");
     if (!userPath) {
-      return NextResponse.json({ error: "Missing 'path' query parameter" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Missing 'path' query parameter" },
+        { status: 400 },
+      );
     }
 
     const projectDir = getProjectDir();
@@ -20,14 +23,25 @@ export async function GET(req: Request) {
     // Guard against symlink escapes at runtime.
     const real = await fs.realpath(absPath);
     const realNormalized = real.replace(/\\/g, "/");
-    const rootWithSep = projectDir.endsWith("/") ? projectDir : `${projectDir}/`;
-    if (realNormalized !== projectDir && !realNormalized.startsWith(rootWithSep)) {
-      return NextResponse.json({ error: "Path escapes project" }, { status: 400 });
+    const rootWithSep = projectDir.endsWith("/")
+      ? projectDir
+      : `${projectDir}/`;
+    if (
+      realNormalized !== projectDir &&
+      !realNormalized.startsWith(rootWithSep)
+    ) {
+      return NextResponse.json(
+        { error: "Path escapes project" },
+        { status: 400 },
+      );
     }
 
     const ext = path.extname(absPath).toLowerCase();
     if (!ALLOWED_EXTS.has(ext)) {
-      return NextResponse.json({ error: "File type not allowed" }, { status: 400 });
+      return NextResponse.json(
+        { error: "File type not allowed" },
+        { status: 400 },
+      );
     }
 
     const stat = await fs.stat(absPath);

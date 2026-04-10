@@ -87,8 +87,11 @@ export async function POST() {
       const logContent = errorData.log_files?.["__main_document__.log"] ?? "";
       const errorLines = logContent
         .split("\n")
-        .filter((line: string) =>
-          line.includes("Error") || line.includes("!") || line.includes("Missing"),
+        .filter(
+          (line: string) =>
+            line.includes("Error") ||
+            line.includes("!") ||
+            line.includes("Missing"),
         )
         .slice(0, 10)
         .join("\n");
@@ -116,7 +119,8 @@ export async function POST() {
       },
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown compilation error";
+    const message =
+      error instanceof Error ? error.message : "Unknown compilation error";
     console.error("Compile error:", message);
     return NextResponse.json({ error: message }, { status: 500 });
   }

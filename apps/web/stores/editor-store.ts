@@ -28,7 +28,10 @@ interface EditorState {
 
 let writeTimer: ReturnType<typeof setTimeout> | null = null;
 
-async function flushWrite(get: () => EditorState, set: (p: Partial<EditorState>) => void) {
+async function flushWrite(
+  get: () => EditorState,
+  set: (p: Partial<EditorState>) => void,
+) {
   const { activePath, buffer, activeKind } = get();
   if (!activePath || activeKind !== "text") {
     set({ writePending: false });
@@ -74,10 +77,15 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       if (res.type === "text") {
         set({ activeKind: "text", buffer: res.content, loading: false });
       } else {
-        set({ activeKind: "binary", activeDataUrl: res.dataUrl, loading: false });
+        set({
+          activeKind: "binary",
+          activeDataUrl: res.dataUrl,
+          loading: false,
+        });
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to open file";
+      const message =
+        error instanceof Error ? error.message : "Failed to open file";
       set({ loadError: message, loading: false });
     }
   },
@@ -110,7 +118,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       if (res.type === "text") set({ buffer: res.content });
       else set({ activeDataUrl: res.dataUrl });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to reload file";
+      const message =
+        error instanceof Error ? error.message : "Failed to reload file";
       set({ loadError: message });
     }
   },

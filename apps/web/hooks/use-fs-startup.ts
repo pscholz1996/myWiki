@@ -30,7 +30,9 @@ export function useFsStartup() {
           const data = await compileLatex();
           pdf.setPdfData(data);
         } catch (error) {
-          pdf.setCompileError(error instanceof Error ? error.message : "Compile failed");
+          pdf.setCompileError(
+            error instanceof Error ? error.message : "Compile failed",
+          );
         } finally {
           pdf.setIsCompiling(false);
         }
@@ -44,7 +46,8 @@ export function useFsStartup() {
 
       // Auto-select main.tex if present, else the first .tex file we find.
       const main =
-        files.find((p) => p === "main.tex") ?? files.find((p) => p.endsWith(".tex"));
+        files.find((p) => p === "main.tex") ??
+        files.find((p) => p.endsWith(".tex"));
       if (main) await openFile(main);
 
       // Try to load the cached PDF first. If fresh, show it immediately.
@@ -69,7 +72,8 @@ export function useFsStartup() {
       const editor = useEditorStore.getState();
       if (editor.activePath && event.path === editor.activePath) {
         if (event.type === "unlink") editor.handleExternalDelete();
-        else if (event.type === "change" || event.type === "add") editor.reloadFromDisk();
+        else if (event.type === "change" || event.type === "add")
+          editor.reloadFromDisk();
       }
 
       // Any watched-file change → recompile.
@@ -90,7 +94,11 @@ export function useFsStartup() {
     });
 
     const unsubEditor = useEditorStore.subscribe((state, prev) => {
-      if (state.writePending !== prev.writePending && prev.writePending && !state.writePending) {
+      if (
+        state.writePending !== prev.writePending &&
+        prev.writePending &&
+        !state.writePending
+      ) {
         // write just flushed to disk → compile (echo-suppressed, so watcher won't)
         scheduleCompile();
       }

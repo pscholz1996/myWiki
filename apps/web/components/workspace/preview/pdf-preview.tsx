@@ -33,14 +33,17 @@ const ZOOM_OPTIONS = [
   { value: "4", label: "400%" },
 ];
 
-const PdfViewer = dynamic(() => import("./pdf-viewer").then((mod) => mod.PdfViewer), {
-  ssr: false,
-  loading: () => (
-    <div className="flex h-full items-center justify-center">
-      <LoaderIcon className="size-6 animate-spin text-muted-foreground" />
-    </div>
-  ),
-});
+const PdfViewer = dynamic(
+  () => import("./pdf-viewer").then((mod) => mod.PdfViewer),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex h-full items-center justify-center">
+        <LoaderIcon className="size-6 animate-spin text-muted-foreground" />
+      </div>
+    ),
+  },
+);
 
 export function PdfPreview() {
   const pdfData = usePdfStore((s) => s.pdfData);
@@ -59,7 +62,9 @@ export function PdfPreview() {
 
   const handleDownload = () => {
     if (!pdfData) return;
-    const blob = new Blob([new Uint8Array(pdfData)], { type: "application/pdf" });
+    const blob = new Blob([new Uint8Array(pdfData)], {
+      type: "application/pdf",
+    });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -78,7 +83,9 @@ export function PdfPreview() {
       const data = await compileLatex();
       setPdfData(data);
     } catch (error) {
-      setCompileError(error instanceof Error ? error.message : "Compilation failed");
+      setCompileError(
+        error instanceof Error ? error.message : "Compilation failed",
+      );
     } finally {
       setIsCompiling(false);
     }
@@ -89,7 +96,9 @@ export function PdfPreview() {
       return (
         <div className="flex flex-1 flex-col items-center justify-center bg-muted/30 p-8">
           <AlertCircleIcon className="mb-4 size-12 text-destructive" />
-          <h2 className="mb-2 font-medium text-destructive text-lg">Compilation Error</h2>
+          <h2 className="mb-2 font-medium text-destructive text-lg">
+            Compilation Error
+          </h2>
           <pre className="max-w-xl whitespace-pre-wrap text-center text-muted-foreground text-xs">
             {compileError}
           </pre>
@@ -101,7 +110,9 @@ export function PdfPreview() {
       return (
         <div className="flex flex-1 flex-col items-center justify-center bg-muted/30 p-8">
           <FileTextIcon className="mb-4 size-16 text-muted-foreground/50" />
-          <h2 className="mb-2 font-medium text-lg text-muted-foreground">PDF Preview</h2>
+          <h2 className="mb-2 font-medium text-lg text-muted-foreground">
+            PDF Preview
+          </h2>
           <p className="text-center text-muted-foreground text-sm">
             Edit a file or click Compile to build your document.
           </p>
@@ -113,8 +124,12 @@ export function PdfPreview() {
       return (
         <div className="flex flex-1 flex-col items-center justify-center bg-muted/30 p-8">
           <AlertCircleIcon className="mb-4 size-12 text-destructive" />
-          <h2 className="mb-2 font-medium text-destructive text-lg">PDF Load Error</h2>
-          <p className="max-w-md text-center text-muted-foreground text-sm">{pdfError}</p>
+          <h2 className="mb-2 font-medium text-destructive text-lg">
+            PDF Load Error
+          </h2>
+          <p className="max-w-md text-center text-muted-foreground text-sm">
+            {pdfError}
+          </p>
         </div>
       );
     }
@@ -143,19 +158,34 @@ export function PdfPreview() {
           ) : pdfData ? (
             <>
               <span className="text-muted-foreground text-xs">Ready</span>
-              <Button variant="ghost" size="icon" className="size-6" onClick={handleCompile}>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-6"
+                onClick={handleCompile}
+              >
                 <RefreshCwIcon className="size-3.5" />
               </Button>
             </>
           ) : compileError ? (
             <>
               <span className="text-destructive text-xs">Error</span>
-              <Button variant="ghost" size="icon" className="size-6" onClick={handleCompile}>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-6"
+                onClick={handleCompile}
+              >
                 <RefreshCwIcon className="size-3.5" />
               </Button>
             </>
           ) : (
-            <Button variant="ghost" size="icon" className="size-6" onClick={handleCompile}>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-6"
+              onClick={handleCompile}
+            >
               <RefreshCwIcon className="size-3.5" />
             </Button>
           )}
@@ -166,13 +196,28 @@ export function PdfPreview() {
             <span className="mr-2 text-muted-foreground text-xs">
               {numPages} {numPages === 1 ? "page" : "pages"}
             </span>
-            <Button variant="ghost" size="icon" className="size-6" onClick={zoomOut} disabled={scale <= 0.25}>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-6"
+              onClick={zoomOut}
+              disabled={scale <= 0.25}
+            >
               <MinusIcon className="size-3.5" />
             </Button>
-            <Button variant="ghost" size="icon" className="size-6" onClick={zoomIn} disabled={scale >= 4}>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-6"
+              onClick={zoomIn}
+              disabled={scale >= 4}
+            >
               <PlusIcon className="size-3.5" />
             </Button>
-            <Select value={scale.toString()} onValueChange={(v) => setScale(Number(v))}>
+            <Select
+              value={scale.toString()}
+              onValueChange={(v) => setScale(Number(v))}
+            >
               <SelectTrigger size="sm" className="h-6! w-auto text-xs">
                 <SelectValue>{Math.round(scale * 100)}%</SelectValue>
               </SelectTrigger>
@@ -185,7 +230,13 @@ export function PdfPreview() {
               </SelectContent>
             </Select>
             <div className="mx-0.5 h-4 w-px bg-border" />
-            <Button variant="ghost" size="icon" className="size-6" onClick={handleDownload} title="Download PDF">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-6"
+              onClick={handleDownload}
+              title="Download PDF"
+            >
               <DownloadIcon className="size-3.5" />
             </Button>
           </div>

@@ -76,7 +76,8 @@ export const useFsStore = create<FsState>((set) => ({
       const { root, tree } = await listFiles();
       set({ root, tree, loading: false });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to list files";
+      const message =
+        error instanceof Error ? error.message : "Failed to list files";
       set({ error: message, loading: false });
     }
   },

@@ -79,7 +79,9 @@ export function Sidebar() {
       <div className="flex h-12 items-center border-sidebar-border border-b px-3">
         <div className="flex flex-col">
           <span className="font-semibold text-sm">OpenPrism</span>
-          <span className="text-muted-foreground text-xs truncate">{rootName}</span>
+          <span className="truncate text-muted-foreground text-xs">
+            {rootName}
+          </span>
         </div>
       </div>
 
@@ -112,7 +114,9 @@ export function Sidebar() {
             </button>
           ))
         ) : (
-          <div className="px-2 py-1 text-muted-foreground text-xs">No sections found</div>
+          <div className="px-2 py-1 text-muted-foreground text-xs">
+            No sections found
+          </div>
         )}
       </div>
 
@@ -139,7 +143,11 @@ export function Sidebar() {
               else setTheme("system");
             }}
             title={
-              theme === "system" ? "System theme" : theme === "light" ? "Light mode" : "Dark mode"
+              theme === "system"
+                ? "System theme"
+                : theme === "light"
+                  ? "Light mode"
+                  : "Dark mode"
             }
           >
             {theme === "system" ? (

@@ -8,8 +8,7 @@ import {
   TooltipContent,
 } from "@/components/ui/tooltip";
 
-interface TooltipIconButtonProps
-  extends React.ComponentProps<typeof Button> {
+interface TooltipIconButtonProps extends React.ComponentProps<typeof Button> {
   tooltip: string;
 }
 

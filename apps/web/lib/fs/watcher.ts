@@ -1,10 +1,6 @@
 import chokidar, { type FSWatcher } from "chokidar";
 import path from "node:path";
-import {
-  ALLOWED_EXTS,
-  BUILD_DIR_NAME,
-  getProjectDir,
-} from "./project-dir";
+import { ALLOWED_EXTS, BUILD_DIR_NAME, getProjectDir } from "./project-dir";
 import { createEchoTracker } from "./echo-suppression";
 
 export type FsEventType = "add" | "change" | "unlink" | "addDir" | "unlinkDir";
@@ -29,7 +25,11 @@ function toRelativePosix(absolutePath: string, projectDir: string): string {
 function shouldEmit(type: FsEventType, relPath: string): boolean {
   // Never forward events from excluded dirs.
   const segments = relPath.split("/");
-  if (segments.some((s) => s === ".git" || s === "node_modules" || s === BUILD_DIR_NAME)) {
+  if (
+    segments.some(
+      (s) => s === ".git" || s === "node_modules" || s === BUILD_DIR_NAME,
+    )
+  ) {
     return false;
   }
 
@@ -48,7 +48,9 @@ function getWatcher(): FSWatcher {
       const rel = toRelativePosix(target, projectDir);
       if (rel === "") return false;
       const first = rel.split("/")[0];
-      return first === ".git" || first === "node_modules" || first === BUILD_DIR_NAME;
+      return (
+        first === ".git" || first === "node_modules" || first === BUILD_DIR_NAME
+      );
     },
     ignoreInitial: true,
     awaitWriteFinish: { stabilityThreshold: 50, pollInterval: 25 },
@@ -58,7 +60,11 @@ function getWatcher(): FSWatcher {
     const absPathPosix = absPath.replace(/\\/g, "/");
     const rel = toRelativePosix(absPath, projectDir);
     if (!shouldEmit(type, rel)) return;
-    if ((type === "add" || type === "change") && echo.shouldSuppress(absPathPosix)) return;
+    if (
+      (type === "add" || type === "change") &&
+      echo.shouldSuppress(absPathPosix)
+    )
+      return;
     const event: FsEvent = { type, path: rel };
     for (const listener of listeners) listener(event);
   };

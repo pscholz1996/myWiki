@@ -30,7 +30,10 @@ export function resolveInProject(
   // Normalize backslashes so Windows-style inputs work.
   const normalizedInput = trimmed.replace(/\\/g, "/");
 
-  if (path.posix.isAbsolute(normalizedInput) || /^[a-zA-Z]:/.test(normalizedInput)) {
+  if (
+    path.posix.isAbsolute(normalizedInput) ||
+    /^[a-zA-Z]:/.test(normalizedInput)
+  ) {
     throw new Error("Absolute paths are not allowed");
   }
 

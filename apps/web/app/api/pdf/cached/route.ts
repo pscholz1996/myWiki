@@ -49,7 +49,10 @@ export async function GET() {
 
     const newestSource = await maxSourceMtime(projectDir);
     if (pdfStat.mtimeMs < newestSource) {
-      return NextResponse.json({ error: "Cached PDF is stale" }, { status: 404 });
+      return NextResponse.json(
+        { error: "Cached PDF is stale" },
+        { status: 404 },
+      );
     }
 
     const buf = await fs.readFile(pdfPath);

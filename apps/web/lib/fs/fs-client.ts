@@ -46,7 +46,10 @@ export async function readFile(path: string): Promise<ReadResponse> {
   return res.json();
 }
 
-export async function writeFile(path: string, content: string): Promise<{ mtime: number }> {
+export async function writeFile(
+  path: string,
+  content: string,
+): Promise<{ mtime: number }> {
   const res = await fetch(`/api/fs/write?path=${encodeURIComponent(path)}`, {
     method: "PUT",
     body: content,

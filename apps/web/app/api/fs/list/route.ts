@@ -3,7 +3,6 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import {
   ALLOWED_EXTS,
-  BUILD_DIR_NAME,
   EXCLUDED_DIRS,
   getProjectDir,
 } from "@/lib/fs/project-dir";

@@ -1,7 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronRightIcon, FileTextIcon, FolderIcon, ImageIcon } from "lucide-react";
+import {
+  ChevronRightIcon,
+  FileTextIcon,
+  FolderIcon,
+  ImageIcon,
+} from "lucide-react";
 import type { FsNode } from "@/lib/fs/fs-client";
 import { cn } from "@/lib/utils";
 
@@ -29,7 +34,11 @@ export function FileTree({ nodes, activePath, onOpen }: FileTreeProps) {
 
 function iconFor(path: string) {
   const lower = path.toLowerCase();
-  if (lower.endsWith(".png") || lower.endsWith(".jpg") || lower.endsWith(".jpeg")) {
+  if (
+    lower.endsWith(".png") ||
+    lower.endsWith(".jpg") ||
+    lower.endsWith(".jpeg")
+  ) {
     return <ImageIcon className="size-4 shrink-0 text-muted-foreground" />;
   }
   return <FileTextIcon className="size-4 shrink-0 text-muted-foreground" />;

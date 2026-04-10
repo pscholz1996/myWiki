@@ -5,7 +5,9 @@ const ROOT = "/home/user/project";
 
 describe("resolveInProject", () => {
   test("accepts a simple relative filename", () => {
-    expect(resolveInProject(ROOT, "main.tex")).toBe("/home/user/project/main.tex");
+    expect(resolveInProject(ROOT, "main.tex")).toBe(
+      "/home/user/project/main.tex",
+    );
   });
 
   test("accepts a nested relative path", () => {
@@ -21,7 +23,9 @@ describe("resolveInProject", () => {
   });
 
   test("accepts explicit ./ prefix", () => {
-    expect(resolveInProject(ROOT, "./main.tex")).toBe("/home/user/project/main.tex");
+    expect(resolveInProject(ROOT, "./main.tex")).toBe(
+      "/home/user/project/main.tex",
+    );
   });
 
   test("collapses legitimate internal traversal that stays in root", () => {
@@ -31,7 +35,9 @@ describe("resolveInProject", () => {
   });
 
   test("rejects traversal escaping root", () => {
-    expect(() => resolveInProject(ROOT, "../etc/passwd")).toThrow(/outside project/i);
+    expect(() => resolveInProject(ROOT, "../etc/passwd")).toThrow(
+      /outside project/i,
+    );
   });
 
   test("rejects absolute POSIX path", () => {
@@ -39,7 +45,9 @@ describe("resolveInProject", () => {
   });
 
   test("rejects absolute Windows-style path", () => {
-    expect(() => resolveInProject(ROOT, "C:/Windows/System32")).toThrow(/absolute/i);
+    expect(() => resolveInProject(ROOT, "C:/Windows/System32")).toThrow(
+      /absolute/i,
+    );
   });
 
   test("rejects empty path", () => {
