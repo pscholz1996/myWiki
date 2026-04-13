@@ -16,7 +16,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "OpenPrism — Local LaTeX Editor",
+  title: "OpenLatex — Local LaTeX Editor",
   description: "Filesystem-backed LaTeX editor with live preview.",
 };
 

@@ -15,27 +15,41 @@ export function useFsStartup() {
   const openFile = useEditorStore((s) => s.openFile);
   const startedRef = useRef(false);
   const compileTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dirtyRef = useRef(false);
 
   useEffect(() => {
     if (startedRef.current) return;
     startedRef.current = true;
 
-    const scheduleCompile = () => {
-      if (compileTimerRef.current) clearTimeout(compileTimerRef.current);
-      compileTimerRef.current = setTimeout(async () => {
-        const pdf = usePdfStore.getState();
-        if (pdf.isCompiling) return;
-        pdf.setIsCompiling(true);
-        try {
-          const data = await compileLatex();
-          pdf.setPdfData(data);
-        } catch (error) {
-          pdf.setCompileError(
-            error instanceof Error ? error.message : "Compile failed",
-          );
-        } finally {
-          pdf.setIsCompiling(false);
+    const runCompile = async () => {
+      const pdf = usePdfStore.getState();
+      pdf.setIsCompiling(true);
+      try {
+        const data = await compileLatex();
+        pdf.setPdfData(data);
+      } catch (error) {
+        pdf.setCompileError(
+          error instanceof Error ? error.message : "Compile failed",
+        );
+      } finally {
+        pdf.setIsCompiling(false);
+        if (dirtyRef.current) {
+          dirtyRef.current = false;
+          runCompile();
         }
+      }
+    };
+
+    const scheduleCompile = () => {
+      const pdf = usePdfStore.getState();
+      if (pdf.isCompiling) {
+        dirtyRef.current = true;
+        return;
+      }
+      if (compileTimerRef.current) clearTimeout(compileTimerRef.current);
+      compileTimerRef.current = setTimeout(() => {
+        dirtyRef.current = false;
+        runCompile();
       }, COMPILE_DEBOUNCE_MS);
     };
 
@@ -44,9 +58,12 @@ export function useFsStartup() {
       const { tree } = useFsStore.getState();
       const files = flattenFiles(tree);
 
-      // Auto-select main.tex if present, else the first .tex file we find.
+      // Auto-select the root document: prefer root-level .tex files with common names.
+      const rootFiles = files.filter((p) => !p.includes("/"));
       const main =
-        files.find((p) => p === "main.tex") ??
+        rootFiles.find((p) => p === "main.tex") ??
+        rootFiles.find((p) => p === "main_thesis.tex") ??
+        rootFiles.find((p) => p.endsWith(".tex")) ??
         files.find((p) => p.endsWith(".tex"));
       if (main) await openFile(main);
 

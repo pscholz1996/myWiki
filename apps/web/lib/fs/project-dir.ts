@@ -34,8 +34,8 @@ export function getProjectDir(): string {
   // Resolve symlinks so all downstream comparisons work consistently.
   const real = fs.realpathSync(resolved).replace(/\\/g, "/");
 
-  // Ensure .openprism/ exists with a .gitignore that hides its contents.
-  const buildDir = path.posix.join(real, ".openprism");
+  // Ensure .openlatex/ exists with a .gitignore that hides its contents.
+  const buildDir = path.posix.join(real, ".openlatex");
   if (!fs.existsSync(buildDir)) {
     fs.mkdirSync(buildDir, { recursive: true });
   }
@@ -48,7 +48,7 @@ export function getProjectDir(): string {
   return real;
 }
 
-export const BUILD_DIR_NAME = ".openprism";
+export const BUILD_DIR_NAME = ".openlatex";
 export const EXCLUDED_DIRS = new Set([".git", "node_modules", BUILD_DIR_NAME]);
 export const ALLOWED_EXTS = new Set([
   ".tex",

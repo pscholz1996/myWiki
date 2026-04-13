@@ -41,7 +41,7 @@ async function gatherResources(projectDir: string): Promise<CompileResource[]> {
           out.push({
             path: relPath,
             content,
-            main: relPath === "main.tex",
+            main: false, // resolved below
           });
         } else {
           const buf = await fs.readFile(absPath);
@@ -53,11 +53,21 @@ async function gatherResources(projectDir: string): Promise<CompileResource[]> {
 
   await walk(projectDir);
 
-  // If no file is named main.tex, mark the first .tex as main.
-  if (!out.some((r) => r.main)) {
-    const firstTex = out.find((r) => r.path.endsWith(".tex"));
-    if (firstTex) firstTex.main = true;
-  }
+  // Find the main document: prefer a root-level .tex containing \documentclass,
+  // then fall back to main.tex / main_thesis.tex, then first root-level .tex.
+  const rootTexFiles = out.filter(
+    (r) => r.content && !r.path.includes("/"),
+  );
+  const withDocumentclass = rootTexFiles.find(
+    (r) => r.content && r.content.includes("\\documentclass"),
+  );
+  const mainFile =
+    withDocumentclass ??
+    out.find((r) => r.path === "main.tex") ??
+    out.find((r) => r.path === "main_thesis.tex") ??
+    rootTexFiles[0] ??
+    out.find((r) => r.path.endsWith(".tex"));
+  if (mainFile) mainFile.main = true;
 
   return out;
 }
@@ -106,7 +116,7 @@ export async function POST() {
 
     const pdfBuffer = Buffer.from(await response.arrayBuffer());
 
-    // Persist to .openprism/out.pdf so next startup can show it instantly.
+    // Persist to .openlatex/out.pdf so next startup can show it instantly.
     // Use path.posix.join so the path matches the POSIX-normalized keys the echo tracker uses.
     const outPath = path.posix.join(projectDir, BUILD_DIR_NAME, "out.pdf");
     echo.recordWrite(outPath); // prevent the watcher from forwarding our own write

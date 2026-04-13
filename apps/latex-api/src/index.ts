@@ -3,7 +3,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { bodyLimit } from "hono/body-limit";
 import { mkdir, rm, writeFile, readFile, access } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
@@ -11,14 +11,17 @@ import { spawn } from "node:child_process";
 const app = new Hono();
 
 const MAX_CONCURRENT = 3;
-const COMPILE_TIMEOUT_MS = 30000;
+const COMPILE_TIMEOUT_MS = 300000; // 5 minutes — MiKTeX first-run installs packages on the fly
 
 let activeCompilations = 0;
 
 function sanitizePath(workDir: string, filePath: string): string | null {
   if (filePath.includes("..")) return null;
   const normalized = resolve(workDir, filePath);
-  if (!normalized.startsWith(`${workDir}/`) && normalized !== workDir) {
+  const workDirWithSep = workDir.endsWith("/") || workDir.endsWith("\\")
+    ? workDir
+    : `${workDir}${sep}`;
+  if (!normalized.startsWith(workDirWithSep) && normalized !== workDir) {
     return null;
   }
   return normalized;
@@ -86,8 +89,8 @@ app.post("/builds/sync", async (c) => {
         return c.json({ error: "Invalid path" } satisfies CompileError, 400);
       }
 
-      const parentDir = fullPath.substring(0, fullPath.lastIndexOf("/"));
-      if (parentDir && parentDir !== workDir) {
+      const parentDir = dirname(fullPath);
+      if (parentDir !== workDir) {
         await mkdir(parentDir, { recursive: true });
       }
 

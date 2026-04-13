@@ -10,6 +10,7 @@ import {
   MinusIcon,
   PlusIcon,
   DownloadIcon,
+  LinkIcon,
 } from "lucide-react";
 import { usePdfStore } from "@/stores/pdf-store";
 import { Button } from "@/components/ui/button";
@@ -52,6 +53,10 @@ export function PdfPreview() {
   const setPdfData = usePdfStore((s) => s.setPdfData);
   const setCompileError = usePdfStore((s) => s.setCompileError);
   const setIsCompiling = usePdfStore((s) => s.setIsCompiling);
+  const scrollToPage = usePdfStore((s) => s.scrollToPage);
+  const setScrollToPage = usePdfStore((s) => s.setScrollToPage);
+  const syncScrollEnabled = usePdfStore((s) => s.syncScrollEnabled);
+  const setSyncScrollEnabled = usePdfStore((s) => s.setSyncScrollEnabled);
 
   const [pdfError, setPdfError] = useState<string | null>(null);
   const [numPages, setNumPages] = useState<number>(0);
@@ -138,10 +143,11 @@ export function PdfPreview() {
       <PdfViewer
         data={pdfData}
         scale={scale}
+        scrollToPage={scrollToPage}
         onError={setPdfError}
         onLoadSuccess={setNumPages}
         onScaleChange={setScale}
-        onTextClick={() => {}}
+        onScrollDone={() => setScrollToPage(null)}
       />
     );
   };
@@ -230,6 +236,19 @@ export function PdfPreview() {
               </SelectContent>
             </Select>
             <div className="mx-0.5 h-4 w-px bg-border" />
+            <Button
+              variant={syncScrollEnabled ? "default" : "ghost"}
+              size="icon"
+              className="size-6"
+              onClick={() => setSyncScrollEnabled(!syncScrollEnabled)}
+              title={
+                syncScrollEnabled
+                  ? "Sync scroll ON — opening a file jumps to its section"
+                  : "Sync scroll OFF"
+              }
+            >
+              <LinkIcon className="size-3.5" />
+            </Button>
             <Button
               variant="ghost"
               size="icon"
