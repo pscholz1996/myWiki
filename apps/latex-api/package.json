@@ -1,5 +1,5 @@
 {
-  "name": "@open-prism/latex-api",
+  "name": "@openlatex/latex-api",
   "version": "0.0.1",
   "private": true,
   "type": "module",

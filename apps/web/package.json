@@ -1,14 +1,14 @@
 {
-  "name": "@open-prism/web",
+  "name": "@openlatex/web",
   "version": "0.0.1",
   "private": true,
-  "description": "Open-source LaTeX editor with live preview",
-  "homepage": "https://github.com/assistant-ui/open-prism",
+  "description": "Local filesystem-backed LaTeX editor with live preview and Git integration",
+  "homepage": "https://github.com/xTazah/OpenLatex",
   "repository": {
     "type": "git",
-    "url": "https://github.com/assistant-ui/open-prism"
+    "url": "https://github.com/xTazah/OpenLatex"
   },
-  "author": "assistant-ui",
+  "author": "xTazah",
   "license": "MIT",
   "scripts": {
     "dev": "next dev",

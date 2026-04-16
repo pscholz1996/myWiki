@@ -1,10 +1,10 @@
 {
-  "name": "@open-prism/root",
-  "description": "Open-Source AI LaTeX writing workspace",
+  "name": "@openlatex/root",
+  "description": "Local filesystem-backed LaTeX editor with live preview and Git integration",
   "version": "0.0.1",
   "repository": {
     "type": "git",
-    "url": "https://github.com/assistant-ui/open-prism"
+    "url": "https://github.com/xTazah/OpenLatex"
   },
   "private": true,
   "workspaces": [
@@ -12,7 +12,7 @@
     "packages/*"
   ],
   "scripts": {
-    "dev:web": "pnpm turbo dev --filter=@open-prism/web",
+    "dev:web": "pnpm turbo dev --filter=@openlatex/web",
     "lint": "pnpm exec biome check",
     "lint:fix": "pnpm exec biome check --fix"
   },
