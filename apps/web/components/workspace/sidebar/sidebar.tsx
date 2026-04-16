@@ -9,6 +9,7 @@ import {
   ListIcon,
   HashIcon,
   GithubIcon,
+  GitBranchIcon,
   ChevronDownIcon,
 } from "lucide-react";
 import { useTheme } from "next-themes";
@@ -23,6 +24,8 @@ import { useEditorStore } from "@/stores/editor-store";
 import { usePdfStore } from "@/stores/pdf-store";
 import { Button } from "@/components/ui/button";
 import { FileTree } from "./file-tree";
+import { SourceControl } from "./source-control";
+import { useGitStore } from "@/stores/git-store";
 import { cn } from "@/lib/utils";
 import packageJson from "@/package.json";
 
@@ -66,13 +69,20 @@ export function Sidebar() {
   const buffer = useEditorStore((s) => s.buffer);
   const activeKind = useEditorStore((s) => s.activeKind);
   const openFile = useEditorStore((s) => s.openFile);
+  const isGitRepo = useGitStore((s) => s.isGitRepo);
+  const branch = useGitStore((s) => s.branch);
+  const ahead = useGitStore((s) => s.ahead);
+  const behind = useGitStore((s) => s.behind);
+  const fileStatuses = useGitStore((s) => s.fileStatuses);
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
   const filesPanelRef = useRef<ImperativePanelHandle>(null);
+  const scPanelRef = useRef<ImperativePanelHandle>(null);
   const outlinePanelRef = useRef<ImperativePanelHandle>(null);
   const [filesCollapsed, setFilesCollapsed] = useState(false);
+  const [scCollapsed, setScCollapsed] = useState(false);
   const [outlineCollapsed, setOutlineCollapsed] = useState(false);
 
   const toc = useMemo(
@@ -95,12 +105,24 @@ export function Sidebar() {
   return (
     <div className="flex h-full flex-col bg-sidebar text-sidebar-foreground">
       <div className="flex h-12 items-center border-sidebar-border border-b px-3">
-        <div className="flex flex-col">
+        <div className="flex min-w-0 flex-1 flex-col">
           <span className="font-semibold text-sm">OpenLatex</span>
           <span className="truncate text-muted-foreground text-xs">
             {rootName}
           </span>
         </div>
+        {isGitRepo && branch && (
+          <div className="flex shrink-0 items-center gap-1 text-muted-foreground text-xs">
+            <GitBranchIcon className="size-3.5" />
+            <span className="max-w-[80px] truncate">{branch}</span>
+            {(ahead > 0 || behind > 0) && (
+              <span className="text-[10px]">
+                {ahead > 0 && `↑${ahead}`}
+                {behind > 0 && `↓${behind}`}
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Files header */}
@@ -133,9 +155,46 @@ export function Sidebar() {
           onExpand={() => setFilesCollapsed(false)}
         >
           <div className="h-full overflow-y-auto p-2">
-            <FileTree nodes={tree} activePath={activePath} onOpen={openFile} />
+            <FileTree nodes={tree} activePath={activePath} onOpen={openFile} fileStatuses={fileStatuses} />
           </div>
         </Panel>
+
+        {/* Source Control header doubles as the resize handle */}
+        {isGitRepo && (
+          <>
+            <PanelResizeHandle className="shrink-0">
+              <button
+                onClick={() =>
+                  scCollapsed
+                    ? scPanelRef.current?.expand()
+                    : scPanelRef.current?.collapse()
+                }
+                className="flex h-9 w-full items-center gap-2 border-sidebar-border border-y px-3 cursor-pointer transition-colors hover:bg-sidebar-accent/50"
+              >
+                <ChevronDownIcon
+                  className={cn(
+                    "size-3.5 text-muted-foreground transition-transform",
+                    scCollapsed && "-rotate-90",
+                  )}
+                />
+                <GitBranchIcon className="size-4 text-muted-foreground" />
+                <span className="font-medium text-xs">Source Control</span>
+              </button>
+            </PanelResizeHandle>
+
+            <Panel
+              ref={scPanelRef}
+              defaultSize={25}
+              minSize={0}
+              collapsible
+              collapsedSize={0}
+              onCollapse={() => setScCollapsed(true)}
+              onExpand={() => setScCollapsed(false)}
+            >
+              <SourceControl />
+            </Panel>
+          </>
+        )}
 
         {/* Outline header doubles as the resize handle */}
         <PanelResizeHandle className="shrink-0">

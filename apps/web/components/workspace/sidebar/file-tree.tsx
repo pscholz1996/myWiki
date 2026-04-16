@@ -8,15 +8,95 @@ import {
   ImageIcon,
 } from "lucide-react";
 import type { FsNode } from "@/lib/fs/fs-client";
+import type { GitFileStatus } from "@/lib/git/git-client";
 import { cn } from "@/lib/utils";
 
 interface FileTreeProps {
   nodes: FsNode[];
   activePath: string | null;
   onOpen: (path: string) => void;
+  fileStatuses?: Map<string, GitFileStatus>;
 }
 
-export function FileTree({ nodes, activePath, onOpen }: FileTreeProps) {
+function gitStatusColor(status: GitFileStatus | undefined): string {
+  switch (status) {
+    case "modified":
+      return "text-yellow-500";
+    case "staged":
+    case "staged-modified":
+    case "staged-deleted":
+    case "renamed":
+      return "text-green-500";
+    case "untracked":
+      return "text-green-700 dark:text-green-400";
+    case "deleted":
+      return "text-red-400 line-through";
+    case "conflicted":
+      return "text-red-500";
+    default:
+      return "";
+  }
+}
+
+function gitStatusBadge(status: GitFileStatus | undefined): string | null {
+  switch (status) {
+    case "modified":
+    case "staged-modified":
+      return "M";
+    case "staged":
+      return "A";
+    case "untracked":
+      return "?";
+    case "deleted":
+    case "staged-deleted":
+      return "D";
+    case "renamed":
+      return "R";
+    case "conflicted":
+      return "C";
+    default:
+      return null;
+  }
+}
+
+/** Compute the "most severe" git status among all descendants of a directory. */
+function dirStatus(
+  node: FsNode,
+  statuses: Map<string, GitFileStatus>,
+): GitFileStatus | undefined {
+  const severity: GitFileStatus[] = [
+    "conflicted",
+    "modified",
+    "deleted",
+    "staged-modified",
+    "staged",
+    "staged-deleted",
+    "renamed",
+    "untracked",
+  ];
+  let worst: GitFileStatus | undefined;
+  let worstIdx = severity.length;
+
+  const stack: FsNode[] = [node];
+  while (stack.length) {
+    const n = stack.pop()!;
+    if (n.type === "file") {
+      const s = statuses.get(n.path);
+      if (s) {
+        const idx = severity.indexOf(s);
+        if (idx !== -1 && idx < worstIdx) {
+          worstIdx = idx;
+          worst = s;
+        }
+      }
+    } else if (n.children) {
+      stack.push(...n.children);
+    }
+  }
+  return worst;
+}
+
+export function FileTree({ nodes, activePath, onOpen, fileStatuses }: FileTreeProps) {
   return (
     <ul className="space-y-0.5">
       {nodes.map((node) => (
@@ -26,6 +106,7 @@ export function FileTree({ nodes, activePath, onOpen }: FileTreeProps) {
           depth={0}
           activePath={activePath}
           onOpen={onOpen}
+          fileStatuses={fileStatuses}
         />
       ))}
     </ul>
@@ -49,14 +130,18 @@ interface TreeNodeProps {
   depth: number;
   activePath: string | null;
   onOpen: (path: string) => void;
+  fileStatuses?: Map<string, GitFileStatus>;
 }
 
-function TreeNode({ node, depth, activePath, onOpen }: TreeNodeProps) {
+function TreeNode({ node, depth, activePath, onOpen, fileStatuses }: TreeNodeProps) {
   const [open, setOpen] = useState(depth < 1);
   const name = node.path.split("/").pop() ?? node.path;
   const paddingLeft = depth * 12 + 8;
 
   if (node.type === "dir") {
+    const dStatus = fileStatuses ? dirStatus(node, fileStatuses) : undefined;
+    const colorCls = gitStatusColor(dStatus);
+
     return (
       <li>
         <button
@@ -71,7 +156,7 @@ function TreeNode({ node, depth, activePath, onOpen }: TreeNodeProps) {
             )}
           />
           <FolderIcon className="size-4 shrink-0 text-muted-foreground" />
-          <span className="truncate">{name}</span>
+          <span className={cn("truncate", colorCls)}>{name}</span>
         </button>
         {open && node.children && node.children.length > 0 && (
           <ul className="space-y-0.5">
@@ -82,6 +167,7 @@ function TreeNode({ node, depth, activePath, onOpen }: TreeNodeProps) {
                 depth={depth + 1}
                 activePath={activePath}
                 onOpen={onOpen}
+                fileStatuses={fileStatuses}
               />
             ))}
           </ul>
@@ -91,6 +177,10 @@ function TreeNode({ node, depth, activePath, onOpen }: TreeNodeProps) {
   }
 
   const isActive = node.path === activePath;
+  const fileStatus = fileStatuses?.get(node.path);
+  const colorCls = gitStatusColor(fileStatus);
+  const badge = gitStatusBadge(fileStatus);
+
   return (
     <li>
       <button
@@ -104,7 +194,12 @@ function TreeNode({ node, depth, activePath, onOpen }: TreeNodeProps) {
         onClick={() => onOpen(node.path)}
       >
         {iconFor(node.path)}
-        <span className="truncate">{name}</span>
+        <span className={cn("min-w-0 flex-1 truncate", !isActive && colorCls)}>{name}</span>
+        {badge && (
+          <span className={cn("shrink-0 font-mono text-[10px]", colorCls)}>
+            {badge}
+          </span>
+        )}
       </button>
     </li>
   );
