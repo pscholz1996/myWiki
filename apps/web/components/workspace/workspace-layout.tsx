@@ -38,7 +38,7 @@ export function WorkspaceLayout() {
       <PanelResizeHandle className="group relative w-0.5 bg-border transition-colors hover:bg-ring">
         <button
           onClick={() => setSwapped((s) => !s)}
-          className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-10 flex size-6 items-center justify-center rounded-full border bg-background shadow-sm opacity-0 transition-opacity group-hover:opacity-100 hover:bg-accent cursor-pointer"
+          className="absolute top-1/2 left-1/2 z-10 flex size-6 -translate-x-1/2 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full border bg-background opacity-0 shadow-sm transition-opacity hover:bg-accent group-hover:opacity-100"
           title="Swap editor and preview"
         >
           <ArrowLeftRightIcon className="size-3" />

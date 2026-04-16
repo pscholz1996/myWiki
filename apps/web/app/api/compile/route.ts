@@ -55,11 +55,9 @@ async function gatherResources(projectDir: string): Promise<CompileResource[]> {
 
   // Find the main document: prefer a root-level .tex containing \documentclass,
   // then fall back to main.tex / main_thesis.tex, then first root-level .tex.
-  const rootTexFiles = out.filter(
-    (r) => r.content && !r.path.includes("/"),
-  );
-  const withDocumentclass = rootTexFiles.find(
-    (r) => r.content && r.content.includes("\\documentclass"),
+  const rootTexFiles = out.filter((r) => r.content && !r.path.includes("/"));
+  const withDocumentclass = rootTexFiles.find((r) =>
+    r.content?.includes("\\documentclass"),
   );
   const mainFile =
     withDocumentclass ??

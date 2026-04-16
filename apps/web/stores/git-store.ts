@@ -74,7 +74,8 @@ export const useGitStore = create<GitState>((set, get) => ({
       });
     } catch (error) {
       set({
-        error: error instanceof Error ? error.message : "Failed to load git info",
+        error:
+          error instanceof Error ? error.message : "Failed to load git info",
       });
     }
   },
@@ -143,8 +144,7 @@ export const useGitStore = create<GitState>((set, get) => ({
       await get().refresh();
       return result.output;
     } catch (error) {
-      const msg =
-        error instanceof Error ? error.message : "Failed to commit";
+      const msg = error instanceof Error ? error.message : "Failed to commit";
       set({ error: msg });
       throw error;
     } finally {

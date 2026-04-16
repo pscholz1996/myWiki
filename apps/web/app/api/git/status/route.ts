@@ -57,7 +57,8 @@ function parsePorcelain(output: string): GitFileEntry[] {
 
     // Conflict markers: both modified, added by both, etc.
     if (
-      (X === "U" || Y === "U") ||
+      X === "U" ||
+      Y === "U" ||
       (X === "A" && Y === "A") ||
       (X === "D" && Y === "D")
     ) {
@@ -70,10 +71,7 @@ function parsePorcelain(output: string): GitFileEntry[] {
       status = "staged-deleted";
     } else if (Y === "D") {
       status = "deleted";
-    } else if (
-      (X === "M" || X === "A") &&
-      (Y === "M" || Y === "D")
-    ) {
+    } else if ((X === "M" || X === "A") && (Y === "M" || Y === "D")) {
       status = "staged-modified";
     } else if (X === "M" || X === "A" || X === "R") {
       status = "staged";

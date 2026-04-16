@@ -27,9 +27,7 @@ export async function fetchGitStatus(): Promise<GitStatusResponse> {
   return res.json();
 }
 
-export async function stageFiles(
-  paths: string[],
-): Promise<{ ok: boolean }> {
+export async function stageFiles(paths: string[]): Promise<{ ok: boolean }> {
   const res = await fetch("/api/git/stage", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -39,9 +37,7 @@ export async function stageFiles(
   return res.json();
 }
 
-export async function unstageFiles(
-  paths: string[],
-): Promise<{ ok: boolean }> {
+export async function unstageFiles(paths: string[]): Promise<{ ok: boolean }> {
   const res = await fetch("/api/git/unstage", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

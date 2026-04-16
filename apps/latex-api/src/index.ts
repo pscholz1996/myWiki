@@ -18,9 +18,10 @@ let activeCompilations = 0;
 function sanitizePath(workDir: string, filePath: string): string | null {
   if (filePath.includes("..")) return null;
   const normalized = resolve(workDir, filePath);
-  const workDirWithSep = workDir.endsWith("/") || workDir.endsWith("\\")
-    ? workDir
-    : `${workDir}${sep}`;
+  const workDirWithSep =
+    workDir.endsWith("/") || workDir.endsWith("\\")
+      ? workDir
+      : `${workDir}${sep}`;
   if (!normalized.startsWith(workDirWithSep) && normalized !== workDir) {
     return null;
   }

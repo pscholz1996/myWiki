@@ -96,7 +96,12 @@ function dirStatus(
   return worst;
 }
 
-export function FileTree({ nodes, activePath, onOpen, fileStatuses }: FileTreeProps) {
+export function FileTree({
+  nodes,
+  activePath,
+  onOpen,
+  fileStatuses,
+}: FileTreeProps) {
   return (
     <ul className="space-y-0.5">
       {nodes.map((node) => (
@@ -133,7 +138,13 @@ interface TreeNodeProps {
   fileStatuses?: Map<string, GitFileStatus>;
 }
 
-function TreeNode({ node, depth, activePath, onOpen, fileStatuses }: TreeNodeProps) {
+function TreeNode({
+  node,
+  depth,
+  activePath,
+  onOpen,
+  fileStatuses,
+}: TreeNodeProps) {
   const [open, setOpen] = useState(depth < 1);
   const name = node.path.split("/").pop() ?? node.path;
   const paddingLeft = depth * 12 + 8;
@@ -194,7 +205,9 @@ function TreeNode({ node, depth, activePath, onOpen, fileStatuses }: TreeNodePro
         onClick={() => onOpen(node.path)}
       >
         {iconFor(node.path)}
-        <span className={cn("min-w-0 flex-1 truncate", !isActive && colorCls)}>{name}</span>
+        <span className={cn("min-w-0 flex-1 truncate", !isActive && colorCls)}>
+          {name}
+        </span>
         {badge && (
           <span className={cn("shrink-0 font-mono text-[10px]", colorCls)}>
             {badge}

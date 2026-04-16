@@ -89,10 +89,7 @@ function FileEntry({
         </span>
       </button>
       <span
-        className={cn(
-          "shrink-0 font-mono text-[10px]",
-          statusColor(status),
-        )}
+        className={cn("shrink-0 font-mono text-[10px]", statusColor(status))}
       >
         {statusLabel(status)}
       </span>
@@ -264,7 +261,7 @@ export function SourceControl() {
       {staged.length > 0 && (
         <div className="py-1">
           <div className="flex items-center justify-between px-2 py-0.5">
-            <span className="font-medium text-muted-foreground text-[10px] uppercase tracking-wider">
+            <span className="font-medium text-[10px] text-muted-foreground uppercase tracking-wider">
               Staged ({staged.length})
             </span>
           </div>
@@ -285,7 +282,7 @@ export function SourceControl() {
       {unstaged.length > 0 && (
         <div className="py-1">
           <div className="flex items-center justify-between px-2 py-0.5">
-            <span className="font-medium text-muted-foreground text-[10px] uppercase tracking-wider">
+            <span className="font-medium text-[10px] text-muted-foreground uppercase tracking-wider">
               Changes ({unstaged.length})
             </span>
           </div>
@@ -306,7 +303,7 @@ export function SourceControl() {
       {untracked.length > 0 && (
         <div className="py-1">
           <div className="flex items-center justify-between px-2 py-0.5">
-            <span className="font-medium text-muted-foreground text-[10px] uppercase tracking-wider">
+            <span className="font-medium text-[10px] text-muted-foreground uppercase tracking-wider">
               Untracked ({untracked.length})
             </span>
           </div>
@@ -323,11 +320,13 @@ export function SourceControl() {
         </div>
       )}
 
-      {staged.length === 0 && unstaged.length === 0 && untracked.length === 0 && (
-        <div className="px-3 py-2 text-muted-foreground text-xs">
-          No changes
-        </div>
-      )}
+      {staged.length === 0 &&
+        unstaged.length === 0 &&
+        untracked.length === 0 && (
+          <div className="px-3 py-2 text-muted-foreground text-xs">
+            No changes
+          </div>
+        )}
     </div>
   );
 }

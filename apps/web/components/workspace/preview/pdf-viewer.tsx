@@ -157,47 +157,43 @@ export function PdfViewer({
   );
 
   // Handle clicks on internal PDF links (annotation layer).
-  const handleClick = useCallback(
-    (e: React.MouseEvent) => {
-      const target = e.target as HTMLElement;
+  const handleClick = useCallback((e: React.MouseEvent) => {
+    const target = e.target as HTMLElement;
 
-      // Check annotation layer links.
-      const link = target.closest("a[href]") as HTMLAnchorElement | null;
-      if (link) {
-        const href = link.getAttribute("href") ?? "";
-        if (href.startsWith("#") && containerRef.current) {
-          e.preventDefault();
-          e.stopPropagation();
-          const dest = href.slice(1);
+    // Check annotation layer links.
+    const link = target.closest("a[href]") as HTMLAnchorElement | null;
+    if (link) {
+      const href = link.getAttribute("href") ?? "";
+      if (href.startsWith("#") && containerRef.current) {
+        e.preventDefault();
+        e.stopPropagation();
+        const dest = href.slice(1);
 
-          // Try pre-built map first (fast).
-          const mapped = destMapRef.current.get(dest);
-          if (mapped) {
-            scrollToPageEl(containerRef.current, mapped);
-            return;
-          }
-
-          // Fall back to runtime resolution.
-          const doc = pdfDocRef.current;
-          if (doc) {
-            doc
-              .getDestination(dest)
-              .then(async (resolved) => {
-                if (!resolved) return;
-                const pageIndex = await doc.getPageIndex(resolved[0]);
-                if (containerRef.current) {
-                  scrollToPageEl(containerRef.current, pageIndex + 1);
-                }
-              })
-              .catch(() => {});
-          }
+        // Try pre-built map first (fast).
+        const mapped = destMapRef.current.get(dest);
+        if (mapped) {
+          scrollToPageEl(containerRef.current, mapped);
           return;
         }
-      }
 
-    },
-    [],
-  );
+        // Fall back to runtime resolution.
+        const doc = pdfDocRef.current;
+        if (doc) {
+          doc
+            .getDestination(dest)
+            .then(async (resolved) => {
+              if (!resolved) return;
+              const pageIndex = await doc.getPageIndex(resolved[0]);
+              if (containerRef.current) {
+                scrollToPageEl(containerRef.current, pageIndex + 1);
+              }
+            })
+            .catch(() => {});
+        }
+        return;
+      }
+    }
+  }, []);
 
   // Scroll to a specific page (from sidebar sync-scroll or outline).
   useEffect(() => {

@@ -132,7 +132,7 @@ export function Sidebar() {
             ? filesPanelRef.current?.expand()
             : filesPanelRef.current?.collapse()
         }
-        className="flex h-9 w-full items-center gap-2 border-sidebar-border border-b px-3 cursor-pointer transition-colors hover:bg-sidebar-accent/50"
+        className="flex h-9 w-full cursor-pointer items-center gap-2 border-sidebar-border border-b px-3 transition-colors hover:bg-sidebar-accent/50"
       >
         <ChevronDownIcon
           className={cn(
@@ -155,7 +155,12 @@ export function Sidebar() {
           onExpand={() => setFilesCollapsed(false)}
         >
           <div className="h-full overflow-y-auto p-2">
-            <FileTree nodes={tree} activePath={activePath} onOpen={openFile} fileStatuses={fileStatuses} />
+            <FileTree
+              nodes={tree}
+              activePath={activePath}
+              onOpen={openFile}
+              fileStatuses={fileStatuses}
+            />
           </div>
         </Panel>
 
@@ -169,7 +174,7 @@ export function Sidebar() {
                     ? scPanelRef.current?.expand()
                     : scPanelRef.current?.collapse()
                 }
-                className="flex h-9 w-full items-center gap-2 border-sidebar-border border-y px-3 cursor-pointer transition-colors hover:bg-sidebar-accent/50"
+                className="flex h-9 w-full cursor-pointer items-center gap-2 border-sidebar-border border-y px-3 transition-colors hover:bg-sidebar-accent/50"
               >
                 <ChevronDownIcon
                   className={cn(
@@ -204,7 +209,7 @@ export function Sidebar() {
                 ? outlinePanelRef.current?.expand()
                 : outlinePanelRef.current?.collapse()
             }
-            className="flex h-9 w-full items-center gap-2 border-sidebar-border border-y px-3 cursor-pointer transition-colors hover:bg-sidebar-accent/50"
+            className="flex h-9 w-full cursor-pointer items-center gap-2 border-sidebar-border border-y px-3 transition-colors hover:bg-sidebar-accent/50"
           >
             <ChevronDownIcon
               className={cn(
