@@ -1,11 +1,21 @@
 import { subscribe, type FsEvent } from "@/lib/fs/watcher";
-import { getProjectDir } from "@/lib/fs/project-dir";
+import { getProjectDir, NoProjectSelectedError } from "@/lib/fs/project-dir";
 
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
 
 export async function GET() {
-  getProjectDir();
+  try {
+    getProjectDir();
+  } catch (error) {
+    if (error instanceof NoProjectSelectedError) {
+      return new Response(JSON.stringify({ error: "no-project-selected" }), {
+        status: 409,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    throw error;
+  }
 
   let cleanup: (() => void) | null = null;
 

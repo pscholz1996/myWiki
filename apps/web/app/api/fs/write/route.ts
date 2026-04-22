@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { getProjectDir, TEXT_EXTS } from "@/lib/fs/project-dir";
+import {
+  getProjectDir,
+  NoProjectSelectedError,
+  TEXT_EXTS,
+} from "@/lib/fs/project-dir";
 import { resolveInProject } from "@/lib/fs/sandbox";
 import { echo } from "@/lib/fs/watcher";
 
@@ -42,6 +46,12 @@ export async function PUT(req: Request) {
     const stat = await fs.stat(absPath);
     return NextResponse.json({ path: userPath, mtime: stat.mtimeMs });
   } catch (error) {
+    if (error instanceof NoProjectSelectedError) {
+      return NextResponse.json(
+        { error: "no-project-selected" },
+        { status: 409 },
+      );
+    }
     const message = error instanceof Error ? error.message : "Unknown error";
     const code = /outside|absolute|empty|invalid|only text/i.test(message)
       ? 400

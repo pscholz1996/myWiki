@@ -5,6 +5,7 @@ import {
   ALLOWED_EXTS,
   BUILD_DIR_NAME,
   EXCLUDED_DIRS,
+  NoProjectSelectedError,
   TEXT_EXTS,
   getProjectDir,
 } from "@/lib/fs/project-dir";
@@ -129,6 +130,12 @@ export async function POST() {
       },
     });
   } catch (error) {
+    if (error instanceof NoProjectSelectedError) {
+      return NextResponse.json(
+        { error: "no-project-selected" },
+        { status: 409 },
+      );
+    }
     const message =
       error instanceof Error ? error.message : "Unknown compilation error";
     console.error("Compile error:", message);

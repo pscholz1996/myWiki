@@ -5,6 +5,7 @@ import {
   ALLOWED_EXTS,
   BUILD_DIR_NAME,
   EXCLUDED_DIRS,
+  NoProjectSelectedError,
   getProjectDir,
 } from "@/lib/fs/project-dir";
 
@@ -63,6 +64,12 @@ export async function GET() {
       },
     });
   } catch (error) {
+    if (error instanceof NoProjectSelectedError) {
+      return NextResponse.json(
+        { error: "no-project-selected" },
+        { status: 409 },
+      );
+    }
     const message = error instanceof Error ? error.message : "Unknown error";
     return NextResponse.json({ error: message }, { status: 500 });
   }

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { gitRun } from "@/lib/git/git-runner";
-import { getProjectDir } from "@/lib/fs/project-dir";
+import { getProjectDir, NoProjectSelectedError } from "@/lib/fs/project-dir";
 import { resolveInProject } from "@/lib/fs/sandbox";
 
 export const dynamic = "force-dynamic";
@@ -40,6 +40,12 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ ok: true });
   } catch (error) {
+    if (error instanceof NoProjectSelectedError) {
+      return NextResponse.json(
+        { error: "no-project-selected" },
+        { status: 409 },
+      );
+    }
     const message = error instanceof Error ? error.message : "Unknown error";
     const code = /outside|absolute|empty|invalid/i.test(message) ? 400 : 500;
     return NextResponse.json({ error: message }, { status: code });

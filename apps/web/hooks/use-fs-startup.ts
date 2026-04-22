@@ -151,6 +151,7 @@ export function useFsStartup() {
     }, GIT_POLL_INTERVAL_MS);
 
     return () => {
+      startedRef.current = false;
       handle.close();
       unsubEditor();
       if (compileTimerRef.current) clearTimeout(compileTimerRef.current);

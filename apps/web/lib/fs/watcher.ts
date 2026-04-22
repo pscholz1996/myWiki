@@ -83,3 +83,20 @@ export function subscribe(listener: Listener): () => void {
   listeners.add(listener);
   return () => listeners.delete(listener);
 }
+
+/**
+ * Tears down the active watcher and clears all listeners. Safe to call when
+ * no watcher is active (no-op). Awaiting resolves after chokidar finishes
+ * releasing its handles; logs and swallows any rejection from close().
+ */
+export async function closeWatcher(): Promise<void> {
+  const w = watcher;
+  watcher = null;
+  listeners.clear();
+  if (!w) return;
+  try {
+    await w.close();
+  } catch (error) {
+    console.warn("[openlatex] watcher.close() rejected:", error);
+  }
+}

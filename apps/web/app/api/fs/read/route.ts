@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { getProjectDir, TEXT_EXTS, ALLOWED_EXTS } from "@/lib/fs/project-dir";
+import {
+  getProjectDir,
+  NoProjectSelectedError,
+  TEXT_EXTS,
+  ALLOWED_EXTS,
+} from "@/lib/fs/project-dir";
 import { resolveInProject } from "@/lib/fs/sandbox";
 
 export const dynamic = "force-dynamic";
@@ -23,11 +28,12 @@ export async function GET(req: Request) {
     // Guard against symlink escapes at runtime.
     const real = await fs.realpath(absPath);
     const realNormalized = real.replace(/\\/g, "/");
-    const rootWithSep = projectDir.endsWith("/")
-      ? projectDir
-      : `${projectDir}/`;
+    const projectDirNormalized = projectDir.replace(/\\/g, "/");
+    const rootWithSep = projectDirNormalized.endsWith("/")
+      ? projectDirNormalized
+      : `${projectDirNormalized}/`;
     if (
-      realNormalized !== projectDir &&
+      realNormalized !== projectDirNormalized &&
       !realNormalized.startsWith(rootWithSep)
     ) {
       return NextResponse.json(
@@ -73,6 +79,12 @@ export async function GET(req: Request) {
       mtime: stat.mtimeMs,
     });
   } catch (error) {
+    if (error instanceof NoProjectSelectedError) {
+      return NextResponse.json(
+        { error: "no-project-selected" },
+        { status: 409 },
+      );
+    }
     const message = error instanceof Error ? error.message : "Unknown error";
     const code = /outside|absolute|empty|invalid/i.test(message) ? 400 : 500;
     return NextResponse.json({ error: message }, { status: code });

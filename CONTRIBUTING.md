@@ -19,14 +19,20 @@ cd OpenLaTex
 # Install dependencies
 pnpm install
 
-# Copy environment variables
+Open http://localhost:3000 after starting the editor. On first run, the welcome screen
+lets you paste or browse to a LaTeX project folder. Your choice is saved to
+`~/.openlatex/config.json` and remembered across restarts.
+
+(Optional) To pre-configure a project directory without using the UI, copy the
+environment file and set `PROJECT_DIR`:
+
+```bash
 cp apps/web/.env.example apps/web/.env.local
+# Set PROJECT_DIR=C:/path/to/your/latex-project in .env.local
 ```
 
-Edit `apps/web/.env.local` and set `PROJECT_DIR` to the absolute or relative path of a LaTeX project on disk:
-
-```env
-PROJECT_DIR="C:/path/to/your/latex-project"
+This bootstraps the config on first run only; once `~/.openlatex/config.json` exists,
+`PROJECT_DIR` is ignored.
 ```
 
 ### Running the LaTeX compiler
@@ -64,17 +70,20 @@ apps/web/
 │   ├── fs/               #   File operations (list, read, write, watch SSE)
 │   ├── git/              #   Git operations (info, status, stage, unstage, commit, pull, push)
 │   ├── compile/          #   LaTeX compilation (reads from disk, proxies to latex-api)
-│   └── pdf/cached/       #   Serves cached PDF if still fresh
+│   ├── pdf/cached/       #   Serves cached PDF if still fresh
+│   └── project/          #   Project picker API (current, set, browse)
 ├── components/
 │   ├── ui/               #   shadcn/ui primitives (button, dialog, tooltip, etc.)
+│   ├── project/          #     Welcome screen, directory browser, project switcher
 │   └── workspace/        #   App-specific components
 │       ├── sidebar/      #     File tree, Source Control panel, Table of Contents
 │       ├── editor/       #     CodeMirror editor, toolbar, search, image preview
 │       └── preview/      #     PDF viewer with zoom, scroll sync, error log
-├── hooks/                #   use-fs-startup (bootstrap), use-keyboard-shortcuts
+├── hooks/                #   use-fs-startup, use-keyboard-shortcuts, use-current-project
 ├── lib/
 │   ├── fs/               #   Sandbox, echo suppression, watcher, project-dir, clients
-│   └── git/              #   Git runner (server-side execFile), Git client (browser fetch)
+│   ├── git/              #   Git runner (server-side execFile), Git client (browser fetch)
+│   └── project/          #   Config module (~/openlatex/config.json), path utils
 ├── stores/               #   Zustand stores: fs, editor, pdf, git
 └── styles/               #   Tailwind CSS v4 globals
 ```

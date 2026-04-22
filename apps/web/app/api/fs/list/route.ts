@@ -4,6 +4,7 @@ import path from "node:path";
 import {
   ALLOWED_EXTS,
   EXCLUDED_DIRS,
+  NoProjectSelectedError,
   getProjectDir,
 } from "@/lib/fs/project-dir";
 
@@ -62,6 +63,12 @@ export async function GET() {
     const tree = await walk(projectDir, projectDir);
     return NextResponse.json({ root: projectDir, tree });
   } catch (error) {
+    if (error instanceof NoProjectSelectedError) {
+      return NextResponse.json(
+        { error: "no-project-selected" },
+        { status: 409 },
+      );
+    }
     const message = error instanceof Error ? error.message : "Unknown error";
     return NextResponse.json({ error: message }, { status: 500 });
   }

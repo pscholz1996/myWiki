@@ -237,7 +237,7 @@ export function PdfPreview() {
             </Select>
             <div className="mx-0.5 h-4 w-px bg-border" />
             <Button
-              variant={syncScrollEnabled ? "default" : "ghost"}
+              variant={syncScrollEnabled ? "secondary" : "ghost"}
               size="icon"
               className="size-6"
               onClick={() => setSyncScrollEnabled(!syncScrollEnabled)}

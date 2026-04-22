@@ -62,7 +62,7 @@ The fork completely rearchitected the project into a **local-first, filesystem-b
 - **Collapsible panels** — Files, Source Control, and Outline panels resize and collapse independently
 
 ### Git Integration
-- **Auto-detection** — Detects if `PROJECT_DIR` is a Git repository on startup
+- **Auto-detection** — Detects if the open project folder is a Git repository on startup
 - **Branch indicator** — Current branch name + ahead/behind badges (`↑2 ↓1`) in the sidebar header
 - **File status colors** — VS Code-style decorations in the file tree:
   - Yellow = modified (unstaged), Green = staged, Dark green = untracked, Red = deleted/conflict
@@ -93,10 +93,6 @@ The fork completely rearchitected the project into a **local-first, filesystem-b
 # Install dependencies
 pnpm install
 
-# Configure environment
-cp apps/web/.env.example apps/web/.env.local
-# Edit apps/web/.env.local — set PROJECT_DIR to your LaTeX project directory.
-
 # Start the LaTeX compiler service (in one terminal)
 # Option A — Docker (recommended):
 cd apps/latex-api && docker build -t latex-api . && docker run -p 3001:3001 latex-api
@@ -106,15 +102,19 @@ cd apps/latex-api && docker build -t latex-api . && docker run -p 3001:3001 late
 
 # Start the editor (in another terminal)
 pnpm dev:web
+
+# Then open http://localhost:3000 — the welcome screen lets you pick your project folder.
+# (Optional) To bootstrap with an env var instead, copy .env.example and set PROJECT_DIR:
+# cp apps/web/.env.example apps/web/.env.local
 ```
 
-Open [http://localhost:3000](http://localhost:3000). Keep VS Code open on the same `PROJECT_DIR` — edits in either tool flow to the other via filesystem watching.
+Open [http://localhost:3000](http://localhost:3000). On first run the welcome screen lets you browse to or paste a project folder path — your choice is saved to `~/.openlatex/config.json`. Keep VS Code open on the same project folder — edits in either tool flow to the other via filesystem watching.
 
 ### Environment Variables
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `PROJECT_DIR` | Yes | — | Absolute or relative path to the LaTeX project root |
+| `PROJECT_DIR` | No | — | Optional one-shot bootstrap: used once on first run if no config exists, then ignored |
 | `LATEX_API_URL` | No | `http://localhost:3001` | URL of the latex-api compilation service |
 
 ## Architecture
