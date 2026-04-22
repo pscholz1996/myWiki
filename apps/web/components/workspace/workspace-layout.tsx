@@ -1,23 +1,29 @@
 "use client";
 
+import { useState } from "react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
-import { Sidebar } from "./sidebar";
+import { ArrowLeftRightIcon } from "lucide-react";
+import { Sidebar } from "./sidebar/sidebar";
 import { LatexEditor } from "./editor/latex-editor";
 import { PdfPreview } from "./preview/pdf-preview";
-import { useProjectInit } from "@/hooks/use-project-init";
-import { useStorageReady } from "@/hooks/use-storage-ready";
+import { useFsStartup } from "@/hooks/use-fs-startup";
 
 export function WorkspaceLayout() {
-  const storageReady = useStorageReady();
-  useProjectInit();
+  useFsStartup();
 
-  if (!storageReady) {
-    return (
-      <div className="flex h-full items-center justify-center">
-        <div className="text-muted-foreground">Loading...</div>
-      </div>
-    );
-  }
+  const [swapped, setSwapped] = useState(false);
+
+  const editorPanel = (
+    <Panel defaultSize={42.5} minSize={25}>
+      <LatexEditor />
+    </Panel>
+  );
+
+  const previewPanel = (
+    <Panel defaultSize={42.5} minSize={25}>
+      <PdfPreview />
+    </Panel>
+  );
 
   return (
     <PanelGroup direction="horizontal" className="h-full">
@@ -27,15 +33,19 @@ export function WorkspaceLayout() {
 
       <PanelResizeHandle className="w-px bg-border transition-colors hover:bg-ring" />
 
-      <Panel defaultSize={42.5} minSize={25}>
-        <LatexEditor />
-      </Panel>
+      {swapped ? previewPanel : editorPanel}
 
-      <PanelResizeHandle className="w-px bg-border transition-colors hover:bg-ring" />
+      <PanelResizeHandle className="group relative w-0.5 bg-border transition-colors hover:bg-ring">
+        <button
+          onClick={() => setSwapped((s) => !s)}
+          className="absolute top-1/2 left-1/2 z-10 flex size-6 -translate-x-1/2 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full border bg-background opacity-0 shadow-sm transition-opacity hover:bg-accent group-hover:opacity-100"
+          title="Swap editor and preview"
+        >
+          <ArrowLeftRightIcon className="size-3" />
+        </button>
+      </PanelResizeHandle>
 
-      <Panel defaultSize={42.5} minSize={25}>
-        <PdfPreview />
-      </Panel>
+      {swapped ? editorPanel : previewPanel}
     </PanelGroup>
   );
 }

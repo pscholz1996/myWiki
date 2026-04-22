@@ -1,23 +1,11 @@
-export interface CompileResource {
-  path: string;
-  content?: string;
-  file?: string;
-  main?: boolean;
-}
-
-export async function compileLatex(
-  resources: CompileResource[],
-): Promise<Uint8Array> {
+export async function compileLatex(): Promise<Uint8Array> {
   const response = await fetch("/api/compile", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ resources }),
+    headers: { "Content-Type": "application/json" },
   });
 
   if (!response.ok) {
-    const data = await response.json();
+    const data = await response.json().catch(() => ({}));
     const message = data.details
       ? `${data.error}\n\n${data.details}`
       : data.error || "Compilation failed";

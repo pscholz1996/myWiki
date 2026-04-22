@@ -16,8 +16,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Open-Prism | LaTeX Writing Workspace",
-  description: "AI-powered LaTeX writing workspace inspired by OpenAI Prism",
+  title: "OpenLatex — Local LaTeX Editor",
+  description: "Filesystem-backed LaTeX editor with live preview.",
 };
 
 export default function RootLayout({

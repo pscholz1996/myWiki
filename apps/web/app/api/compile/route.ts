@@ -1,7 +1,17 @@
 import { NextResponse } from "next/server";
-import { compileRatelimit, getIP } from "@/lib/ratelimit";
+import fs from "node:fs/promises";
+import path from "node:path";
+import {
+  ALLOWED_EXTS,
+  BUILD_DIR_NAME,
+  EXCLUDED_DIRS,
+  TEXT_EXTS,
+  getProjectDir,
+} from "@/lib/fs/project-dir";
+import { echo } from "@/lib/fs/watcher";
 
 export const maxDuration = 60;
+export const dynamic = "force-dynamic";
 
 interface CompileResource {
   path: string;
@@ -10,80 +20,78 @@ interface CompileResource {
   main?: boolean;
 }
 
-export async function POST(req: Request) {
-  if (compileRatelimit) {
-    const ip = getIP(req);
-    const { success, limit, remaining, reset } =
-      await compileRatelimit.limit(ip);
+/** Walk PROJECT_DIR and return every .tex/.bib/.cls/.sty/image as a resource. */
+async function gatherResources(projectDir: string): Promise<CompileResource[]> {
+  const out: CompileResource[] = [];
 
-    if (!success) {
-      return NextResponse.json(
-        { error: "Too many requests" },
-        {
-          status: 429,
-          headers: {
-            "X-RateLimit-Limit": limit.toString(),
-            "X-RateLimit-Remaining": remaining.toString(),
-            "X-RateLimit-Reset": reset.toString(),
-          },
-        },
-      );
+  async function walk(dir: string) {
+    const entries = await fs.readdir(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        if (EXCLUDED_DIRS.has(entry.name)) continue;
+        await walk(path.join(dir, entry.name));
+      } else if (entry.isFile()) {
+        const absPath = path.join(dir, entry.name);
+        const ext = path.extname(entry.name).toLowerCase();
+        if (!ALLOWED_EXTS.has(ext)) continue;
+        const relPath = path.relative(projectDir, absPath).replace(/\\/g, "/");
+
+        if (TEXT_EXTS.has(ext)) {
+          const content = await fs.readFile(absPath, "utf8");
+          out.push({
+            path: relPath,
+            content,
+            main: false, // resolved below
+          });
+        } else {
+          const buf = await fs.readFile(absPath);
+          out.push({ path: relPath, file: buf.toString("base64") });
+        }
+      }
     }
   }
 
-  try {
-    const { resources } = (await req.json()) as {
-      resources: CompileResource[];
-    };
+  await walk(projectDir);
 
-    if (!resources || resources.length === 0) {
+  // Find the main document: prefer a root-level .tex containing \documentclass,
+  // then fall back to main.tex / main_thesis.tex, then first root-level .tex.
+  const rootTexFiles = out.filter((r) => r.content && !r.path.includes("/"));
+  const withDocumentclass = rootTexFiles.find((r) =>
+    r.content?.includes("\\documentclass"),
+  );
+  const mainFile =
+    withDocumentclass ??
+    out.find((r) => r.path === "main.tex") ??
+    out.find((r) => r.path === "main_thesis.tex") ??
+    rootTexFiles[0] ??
+    out.find((r) => r.path.endsWith(".tex"));
+  if (mainFile) mainFile.main = true;
+
+  return out;
+}
+
+export async function POST() {
+  try {
+    const projectDir = getProjectDir();
+    const resources = await gatherResources(projectDir);
+
+    if (resources.length === 0) {
       return NextResponse.json(
-        { error: "No resources provided" },
+        { error: "No LaTeX sources found under PROJECT_DIR" },
         { status: 400 },
       );
     }
 
-    const apiResources = resources.map((r) => {
-      const resource: Record<string, unknown> = {
-        path: r.path,
-      };
-
-      const isBase64Image =
-        r.content &&
-        !r.file &&
-        (r.content.startsWith("/9j/") || r.content.startsWith("iVBOR"));
-
-      if (isBase64Image) {
-        const cleanBase64 = r.content?.replace(/\s/g, "");
-        resource.file = cleanBase64;
-      } else if (r.content) {
-        resource.content = r.content;
-      }
-
-      if (r.file) {
-        const cleanBase64 = r.file.replace(/\s/g, "");
-        resource.file = cleanBase64;
-      }
-      if (r.main) resource.main = r.main;
-      return resource;
-    });
-
     const latexApiUrl = process.env.LATEX_API_URL || "http://localhost:3001";
     const response = await fetch(`${latexApiUrl}/builds/sync`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        compiler: "pdflatex",
-        resources: apiResources,
-      }),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ compiler: "pdflatex", resources }),
     });
 
     const contentType = response.headers.get("content-type") ?? "";
-
     if (!response.ok || contentType.includes("application/json")) {
-      const errorData = await response.json();
+      const errorData = await response.json().catch(() => ({}));
       const logContent = errorData.log_files?.["__main_document__.log"] ?? "";
       const errorLines = logContent
         .split("\n")
@@ -97,14 +105,20 @@ export async function POST(req: Request) {
         .join("\n");
       return NextResponse.json(
         {
-          error: `Compilation failed: ${errorData.error || "Unknown error"}`,
+          error: `Compilation failed: ${errorData.error || response.statusText}`,
           details: errorLines || logContent.slice(-1000),
         },
         { status: 500 },
       );
     }
 
-    const pdfBuffer = await response.arrayBuffer();
+    const pdfBuffer = Buffer.from(await response.arrayBuffer());
+
+    // Persist to .openlatex/out.pdf so next startup can show it instantly.
+    // Use path.posix.join so the path matches the POSIX-normalized keys the echo tracker uses.
+    const outPath = path.posix.join(projectDir, BUILD_DIR_NAME, "out.pdf");
+    echo.recordWrite(outPath); // prevent the watcher from forwarding our own write
+    await fs.writeFile(outPath, pdfBuffer);
 
     return new NextResponse(pdfBuffer, {
       headers: {
@@ -113,13 +127,9 @@ export async function POST(req: Request) {
       },
     });
   } catch (error) {
-    console.error("Compilation error:", error);
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error ? error.message : "Unknown compilation error",
-      },
-      { status: 500 },
-    );
+    const message =
+      error instanceof Error ? error.message : "Unknown compilation error";
+    console.error("Compile error:", message);
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

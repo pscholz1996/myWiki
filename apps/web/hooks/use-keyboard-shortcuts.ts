@@ -1,16 +1,14 @@
 "use client";
 
 import { useEffect } from "react";
-import { useDocumentStore } from "@/stores/document-store";
 
 export function useKeyboardShortcuts() {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Ctrl/Cmd+S: prevent default browser save dialog.
+      // The editor auto-saves to disk via debounced write-through.
       if ((e.metaKey || e.ctrlKey) && e.key === "s") {
         e.preventDefault();
-        const { setIsSaving } = useDocumentStore.getState();
-        setIsSaving(true);
-        setTimeout(() => setIsSaving(false), 1000);
       }
     };
 

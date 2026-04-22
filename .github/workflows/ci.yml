@@ -39,6 +39,6 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - run: pnpm --filter @open-prism/web build
+      - run: pnpm --filter @openlatex/web build
 
-      - run: pnpm --filter @open-prism/latex-api build
+      - run: pnpm --filter @openlatex/latex-api build

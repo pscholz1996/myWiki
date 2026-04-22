@@ -15,7 +15,7 @@ import {
   MinusIcon,
   PlusIcon,
 } from "lucide-react";
-import { TooltipIconButton } from "@/components/assistant-ui/tooltip-icon-button";
+import { TooltipIconButton } from "@/components/ui/tooltip-icon-button";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -24,7 +24,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useDocumentStore } from "@/stores/document-store";
+import { useEditorStore } from "@/stores/editor-store";
 
 const ZOOM_OPTIONS = [
   { value: "0.5", label: "50%" },
@@ -50,10 +50,8 @@ export function EditorToolbar({
   imageScale = 1,
   onImageScaleChange,
 }: EditorToolbarProps) {
-  const fileName = useDocumentStore((s) => {
-    const activeFile = s.files.find((f) => f.id === s.activeFileId);
-    return activeFile?.name ?? "document.tex";
-  });
+  const activePath = useEditorStore((s) => s.activePath);
+  const fileName = activePath?.split("/").pop() ?? "document.tex";
 
   const insertText = (before: string, after: string = "") => {
     const view = editorView.current;

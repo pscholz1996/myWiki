@@ -27,12 +27,9 @@ import {
   findPrevious,
 } from "@codemirror/search";
 import { latex } from "codemirror-lang-latex";
-import { useDocumentStore, type ProjectFile } from "@/stores/document-store";
-import { compileLatex, type CompileResource } from "@/lib/latex-compiler";
+import { useEditorStore } from "@/stores/editor-store";
 import { EditorToolbar } from "./editor-toolbar";
-import { AIDrawer } from "./ai-drawer";
 import { ImagePreview } from "./image-preview";
-import { LatexTools } from "./latex-tools";
 import { SearchPanel } from "./search-panel";
 
 interface StickyItem {
@@ -53,7 +50,6 @@ interface ParsedLine {
 function parseLatexStructure(content: string): ParsedLine[] {
   const lines = content.split("\n");
   const result: ParsedLine[] = [];
-
   const sectionRegex =
     /\\(part|chapter|section|subsection|subsubsection)\*?\s*\{[^}]*\}/;
   const beginRegex = /\\begin\{([^}]+)\}/;
@@ -70,7 +66,6 @@ function parseLatexStructure(content: string): ParsedLine[] {
       });
       return;
     }
-
     const beginMatch = lineContent.match(beginRegex);
     if (beginMatch) {
       result.push({
@@ -81,7 +76,6 @@ function parseLatexStructure(content: string): ParsedLine[] {
       });
       return;
     }
-
     const endMatch = lineContent.match(endRegex);
     if (endMatch) {
       result.push({
@@ -92,7 +86,6 @@ function parseLatexStructure(content: string): ParsedLine[] {
       });
     }
   });
-
   return result;
 }
 
@@ -101,7 +94,6 @@ function getStickyLines(
   currentLine: number,
 ): StickyItem[] {
   const stack: StickyItem[] = [];
-
   const sectionLevelMap: Record<string, number> = {
     part: 0,
     chapter: 1,
@@ -112,7 +104,6 @@ function getStickyLines(
 
   for (const item of parsedLines) {
     if (item.line > currentLine) break;
-
     if (item.type === "section") {
       const level = sectionLevelMap[item.name] ?? 2;
       while (
@@ -146,54 +137,21 @@ function getStickyLines(
       }
     }
   }
-
   return stack;
-}
-
-function gatherResources(files: ProjectFile[]): CompileResource[] {
-  return files.map((f) => {
-    if (f.type === "tex") {
-      return {
-        path: f.name,
-        content: f.content ?? "",
-        main: f.name === "document.tex",
-      };
-    }
-    const dataUrl = f.dataUrl ?? "";
-    let base64 = dataUrl.includes(",") ? dataUrl.split(",")[1] : dataUrl;
-    base64 = base64.replace(/\s/g, "");
-    return {
-      path: f.name,
-      file: base64,
-    };
-  });
-}
-
-function getActiveFileContent(): string {
-  const state = useDocumentStore.getState();
-  const activeFile = state.files.find((f) => f.id === state.activeFileId);
-  return activeFile?.content ?? "";
 }
 
 export function LatexEditor() {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
 
-  const files = useDocumentStore((s) => s.files);
-  const activeFileId = useDocumentStore((s) => s.activeFileId);
-  const setContent = useDocumentStore((s) => s.setContent);
-  const setCursorPosition = useDocumentStore((s) => s.setCursorPosition);
-  const setSelectionRange = useDocumentStore((s) => s.setSelectionRange);
-  const jumpToPosition = useDocumentStore((s) => s.jumpToPosition);
-  const clearJumpRequest = useDocumentStore((s) => s.clearJumpRequest);
-  const isCompiling = useDocumentStore((s) => s.isCompiling);
-  const setIsCompiling = useDocumentStore((s) => s.setIsCompiling);
-  const setPdfData = useDocumentStore((s) => s.setPdfData);
-  const setCompileError = useDocumentStore((s) => s.setCompileError);
+  const activePath = useEditorStore((s) => s.activePath);
+  const activeKind = useEditorStore((s) => s.activeKind);
+  const buffer = useEditorStore((s) => s.buffer);
+  const activeDataUrl = useEditorStore((s) => s.activeDataUrl);
+  const loading = useEditorStore((s) => s.loading);
+  const setBuffer = useEditorStore((s) => s.setBuffer);
 
-  const activeFile = files.find((f) => f.id === activeFileId);
-  const isTexFile = activeFile?.type === "tex";
-  const activeFileContent = activeFile?.content;
+  const isTexFile = activeKind === "text";
 
   const [imageScale, setImageScale] = useState(0.5);
   const [currentLine, setCurrentLine] = useState(1);
@@ -206,11 +164,7 @@ export function LatexEditor() {
   const [matchCount, setMatchCount] = useState(0);
   const [currentMatch, setCurrentMatch] = useState(0);
 
-  const parsedLines = useMemo(
-    () => parseLatexStructure(activeFileContent ?? ""),
-    [activeFileContent],
-  );
-
+  const parsedLines = useMemo(() => parseLatexStructure(buffer), [buffer]);
   const stickyLines = useMemo(() => {
     const items = getStickyLines(parsedLines, currentLine);
     return items.map((item) => ({
@@ -219,32 +173,25 @@ export function LatexEditor() {
     }));
   }, [parsedLines, currentLine, lineHtmlCache]);
 
-  const compileRef = useRef<() => void>(() => {});
   const isSearchOpenRef = useRef(false);
-
   useEffect(() => {
     isSearchOpenRef.current = isSearchOpen;
   }, [isSearchOpen]);
 
   useEffect(() => {
-    if (!searchQuery || !activeFileContent) {
+    if (!searchQuery || !buffer) {
       setMatchCount(0);
       setCurrentMatch(0);
       return;
     }
-
     const regex = new RegExp(
       searchQuery.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
       "gi",
     );
-    const matches = activeFileContent.match(regex);
+    const matches = buffer.match(regex);
     setMatchCount(matches?.length ?? 0);
-    if (matches && matches.length > 0) {
-      setCurrentMatch(1);
-    } else {
-      setCurrentMatch(0);
-    }
-  }, [searchQuery, activeFileContent]);
+    setCurrentMatch(matches && matches.length > 0 ? 1 : 0);
+  }, [searchQuery, buffer]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -253,7 +200,6 @@ export function LatexEditor() {
         setIsSearchOpen(true);
       }
     };
-
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
@@ -261,20 +207,13 @@ export function LatexEditor() {
   useEffect(() => {
     const view = viewRef.current;
     if (!view) return;
-
     const query = new SearchQuery({
       search: searchQuery,
       caseSensitive: false,
       literal: true,
     });
-
-    view.dispatch({
-      effects: setSearchQueryEffect.of(query),
-    });
-
-    if (searchQuery) {
-      findNext(view);
-    }
+    view.dispatch({ effects: setSearchQueryEffect.of(query) });
+    if (searchQuery) findNext(view);
   }, [searchQuery]);
 
   const handleFindNext = () => {
@@ -283,7 +222,6 @@ export function LatexEditor() {
     findNext(view);
     view.focus();
   };
-
   const handleFindPrevious = () => {
     const view = viewRef.current;
     if (!view) return;
@@ -291,40 +229,12 @@ export function LatexEditor() {
     view.focus();
   };
 
-  compileRef.current = async () => {
-    if (isCompiling) return;
-    setIsCompiling(true);
-    try {
-      const currentFiles = useDocumentStore.getState().files;
-      const resources = gatherResources(currentFiles);
-      const data = await compileLatex(resources);
-      setPdfData(data);
-    } catch (error) {
-      setCompileError(
-        error instanceof Error ? error.message : "Compilation failed",
-      );
-    } finally {
-      setIsCompiling(false);
-    }
-  };
-
   useEffect(() => {
     if (!containerRef.current || !isTexFile) return;
 
-    const currentContent = getActiveFileContent();
-
     const updateListener = EditorView.updateListener.of((update) => {
       if (update.docChanged) {
-        setContent(update.state.doc.toString());
-      }
-      if (update.selectionSet) {
-        const { from, to, head } = update.state.selection.main;
-        setCursorPosition(head);
-        if (from !== to) {
-          setSelectionRange({ start: from, end: to });
-        } else {
-          setSelectionRange(null);
-        }
+        setBuffer(update.state.doc.toString());
       }
     });
 
@@ -336,9 +246,7 @@ export function LatexEditor() {
         setCurrentLine(lineNumber);
 
         const gutter = view.dom.querySelector(".cm-gutters");
-        if (gutter) {
-          setGutterWidth(gutter.getBoundingClientRect().width);
-        }
+        if (gutter) setGutterWidth(gutter.getBoundingClientRect().width);
 
         const cmLines = view.dom.querySelectorAll(".cm-line");
         const newCache: Record<number, string> = {};
@@ -353,7 +261,7 @@ export function LatexEditor() {
       },
     });
 
-    const compileKeymap = Prec.highest(
+    const editorKeymap = Prec.highest(
       keymap.of([
         {
           key: "Enter",
@@ -362,8 +270,7 @@ export function LatexEditor() {
               findNext(view);
               return true;
             }
-            compileRef.current();
-            return true;
+            return insertNewlineAndIndent(view);
           },
         },
         {
@@ -373,16 +280,7 @@ export function LatexEditor() {
               findPrevious(view);
               return true;
             }
-            return insertNewlineAndIndent(view);
-          },
-        },
-        {
-          key: "Mod-s",
-          run: () => {
-            const { setIsSaving } = useDocumentStore.getState();
-            setIsSaving(true);
-            setTimeout(() => setIsSaving(false), 1000);
-            return true;
+            return false;
           },
         },
         {
@@ -406,9 +304,9 @@ export function LatexEditor() {
     );
 
     const state = EditorState.create({
-      doc: currentContent,
+      doc: buffer,
       extensions: [
-        compileKeymap,
+        editorKeymap,
         lineNumbers(),
         highlightActiveLine(),
         highlightActiveLineGutter(),
@@ -424,24 +322,14 @@ export function LatexEditor() {
         EditorView.lineWrapping,
         scrollPastEnd(),
         EditorView.theme({
-          "&": {
-            height: "100%",
-            fontSize: "14px",
-          },
-          ".cm-scroller": {
-            overflow: "auto",
-          },
-          ".cm-gutters": {
-            paddingRight: "4px",
-          },
+          "&": { height: "100%", fontSize: "14px" },
+          ".cm-scroller": { overflow: "auto" },
+          ".cm-gutters": { paddingRight: "4px" },
           ".cm-lineNumbers .cm-gutterElement": {
             paddingLeft: "8px",
             paddingRight: "4px",
           },
-          ".cm-content": {
-            paddingLeft: "8px",
-            paddingRight: "12px",
-          },
+          ".cm-content": { paddingLeft: "8px", paddingRight: "12px" },
           ".cm-searchMatch": {
             backgroundColor: "#facc15 !important",
             color: "#000 !important",
@@ -461,55 +349,48 @@ export function LatexEditor() {
       ],
     });
 
-    const view = new EditorView({
-      state,
-      parent: containerRef.current,
-    });
-
+    const view = new EditorView({ state, parent: containerRef.current });
     viewRef.current = view;
 
     return () => {
       view.destroy();
       viewRef.current = null;
     };
-  }, [
-    activeFileId,
-    isTexFile,
-    setContent,
-    setCursorPosition,
-    setSelectionRange,
-  ]);
+  }, [activePath, isTexFile, setBuffer]);
 
+  // Sync external buffer changes (e.g. watcher-driven reload) into CodeMirror.
   useEffect(() => {
     const view = viewRef.current;
     if (!view || !isTexFile) return;
-
-    const content = activeFileContent ?? "";
     const currentContent = view.state.doc.toString();
-    if (currentContent !== content) {
+    if (currentContent !== buffer) {
+      const prevSelection = view.state.selection.main;
+      const newLen = buffer.length;
+      const clampedAnchor = Math.min(prevSelection.anchor, newLen);
       view.dispatch({
-        changes: {
-          from: 0,
-          to: currentContent.length,
-          insert: content,
-        },
+        changes: { from: 0, to: currentContent.length, insert: buffer },
+        selection: { anchor: clampedAnchor },
       });
     }
-  }, [activeFileContent, isTexFile]);
+  }, [buffer, isTexFile]);
 
-  useEffect(() => {
-    const view = viewRef.current;
-    if (!view || jumpToPosition === null) return;
+  if (!activePath) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center bg-background text-muted-foreground text-sm">
+        Select a file from the sidebar to start editing.
+      </div>
+    );
+  }
 
-    view.dispatch({
-      selection: { anchor: jumpToPosition },
-      effects: EditorView.scrollIntoView(jumpToPosition, { y: "center" }),
-    });
-    view.focus();
-    clearJumpRequest();
-  }, [jumpToPosition, clearJumpRequest]);
+  if (loading) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center bg-background text-muted-foreground text-sm">
+        Loading {activePath}…
+      </div>
+    );
+  }
 
-  if (!isTexFile && activeFile) {
+  if (activeKind === "binary") {
     return (
       <div className="flex h-full flex-col bg-background">
         <EditorToolbar
@@ -519,8 +400,17 @@ export function LatexEditor() {
           onImageScaleChange={setImageScale}
         />
         <div className="relative min-h-0 flex-1 overflow-hidden">
-          <ImagePreview file={activeFile} scale={imageScale} />
-          <AIDrawer />
+          {activeDataUrl && (
+            <ImagePreview
+              file={{
+                id: activePath,
+                name: activePath,
+                type: "image",
+                dataUrl: activeDataUrl,
+              }}
+              scale={imageScale}
+            />
+          )}
         </div>
       </div>
     );
@@ -585,9 +475,7 @@ export function LatexEditor() {
           </div>
         )}
         <div ref={containerRef} className="absolute inset-0" />
-        <AIDrawer />
       </div>
-      <LatexTools />
     </div>
   );
 }
