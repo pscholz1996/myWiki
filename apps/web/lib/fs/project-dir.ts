@@ -31,15 +31,15 @@ export function getProjectDir(): string {
     throw new Error(`PROJECT_DIR must be a directory: ${resolved}`);
   }
 
-  // Resolve symlinks so all downstream comparisons work consistently.
-  const real = fs.realpathSync(resolved).replace(/\\/g, "/");
+  // Resolve symlinks for consistency. Keep native path format for system operations.
+  const real = fs.realpathSync(resolved);
 
   // Ensure .openlatex/ exists with a .gitignore that hides its contents.
-  const buildDir = path.posix.join(real, ".openlatex");
+  const buildDir = path.join(real, ".openlatex");
   if (!fs.existsSync(buildDir)) {
     fs.mkdirSync(buildDir, { recursive: true });
   }
-  const gitignore = path.posix.join(buildDir, ".gitignore");
+  const gitignore = path.join(buildDir, ".gitignore");
   if (!fs.existsSync(gitignore)) {
     fs.writeFileSync(gitignore, "*\n", "utf8");
   }

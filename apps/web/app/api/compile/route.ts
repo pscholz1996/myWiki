@@ -115,9 +115,11 @@ export async function POST() {
     const pdfBuffer = Buffer.from(await response.arrayBuffer());
 
     // Persist to .openlatex/out.pdf so next startup can show it instantly.
-    // Use path.posix.join so the path matches the POSIX-normalized keys the echo tracker uses.
-    const outPath = path.posix.join(projectDir, BUILD_DIR_NAME, "out.pdf");
-    echo.recordWrite(outPath); // prevent the watcher from forwarding our own write
+    // Use path.join for filesystem ops (handles spaces correctly on Windows),
+    // then normalize to POSIX for echo tracker.
+    const outPath = path.join(projectDir, BUILD_DIR_NAME, "out.pdf");
+    const outPathPosix = outPath.replace(/\\/g, "/");
+    echo.recordWrite(outPathPosix); // prevent the watcher from forwarding our own write
     await fs.writeFile(outPath, pdfBuffer);
 
     return new NextResponse(pdfBuffer, {
