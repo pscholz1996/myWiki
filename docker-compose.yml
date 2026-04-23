@@ -1,0 +1,13 @@
+services:
+  latex-api:
+    build:
+      context: .
+      dockerfile: apps/latex-api/Dockerfile
+    ports:
+      - "3001:3001"
+    volumes:
+      # Persist TeX Live directory so auto-installed packages survive restarts
+      - texlive-data:/usr/local/texlive
+
+volumes:
+  texlive-data:

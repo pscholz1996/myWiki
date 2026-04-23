@@ -11,9 +11,33 @@ import { spawn } from "node:child_process";
 const app = new Hono();
 
 const MAX_CONCURRENT = 3;
-const COMPILE_TIMEOUT_MS = 300000; // 5 minutes — MiKTeX first-run installs packages on the fly
+const COMPILE_TIMEOUT_MS = 300000; // 5 minutes — allows time for on-the-fly package installs
+const MAX_AUTO_INSTALL_RETRIES = 3;
 
 let activeCompilations = 0;
+
+/** Parse a LaTeX log for missing .sty / .cls files */
+function findMissingPackageFiles(logContent: string): string[] {
+  const missing = new Set<string>();
+  for (const m of logContent.matchAll(
+    /! LaTeX Error: File `([^']+)' not found/g,
+  )) {
+    missing.add(m[1]);
+  }
+  return [...missing];
+}
+
+/** Ask tlmgr to install packages by file-stem name */
+function installTexPackages(fileNames: string[]): Promise<boolean> {
+  const pkgNames = fileNames.map((f) => f.replace(/\.[^.]+$/, ""));
+  return new Promise((resolve) => {
+    const proc = spawn("tlmgr", ["install", ...pkgNames], {
+      stdio: "ignore",
+    });
+    proc.on("close", (code) => resolve(code === 0));
+    proc.on("error", () => resolve(false));
+  });
+}
 
 function sanitizePath(workDir: string, filePath: string): string | null {
   if (filePath.includes("..")) return null;
@@ -136,10 +160,29 @@ app.post("/builds/sync", async (c) => {
     };
 
     const latexCmd = [compilerCmd, "-interaction=nonstopmode", mainPath];
+    const logPath = join(workDir, `${mainFileName}.log`);
+
+    // Helper: run first pass then auto-install any missing LaTeX packages
+    const firstPassWithAutoInstall = async () => {
+      let result = await runWithTimeout(latexCmd);
+      if (result.timedOut) return { timedOut: true } as const;
+
+      for (let attempt = 0; attempt < MAX_AUTO_INSTALL_RETRIES; attempt++) {
+        let logText = "";
+        try { logText = await readFile(logPath, "utf-8"); } catch {}
+        const missingFiles = findMissingPackageFiles(logText);
+        if (missingFiles.length === 0) break;
+        const installed = await installTexPackages(missingFiles);
+        if (!installed) break;
+        result = await runWithTimeout(latexCmd);
+        if (result.timedOut) return { timedOut: true } as const;
+      }
+      return { timedOut: false };
+    };
 
     if (hasBib) {
-      let result = await runWithTimeout(latexCmd);
-      if (result.timedOut) {
+      const first = await firstPassWithAutoInstall();
+      if (first.timedOut) {
         return c.json(
           { error: "Compilation timed out" } satisfies CompileError,
           500,
@@ -170,19 +213,25 @@ app.post("/builds/sync", async (c) => {
         }
       }
     } else {
-      for (let i = 0; i < 2; i++) {
-        const result = await runWithTimeout(latexCmd);
-        if (result.timedOut) {
-          return c.json(
-            { error: "Compilation timed out" } satisfies CompileError,
-            500,
-          );
-        }
+      const first = await firstPassWithAutoInstall();
+      if (first.timedOut) {
+        return c.json(
+          { error: "Compilation timed out" } satisfies CompileError,
+          500,
+        );
+      }
+
+      // Second pass (resolves cross-references)
+      const result = await runWithTimeout(latexCmd);
+      if (result.timedOut) {
+        return c.json(
+          { error: "Compilation timed out" } satisfies CompileError,
+          500,
+        );
       }
     }
 
     const pdfPath = join(workDir, `${mainFileName}.pdf`);
-    const logPath = join(workDir, `${mainFileName}.log`);
 
     let logContent = "";
     try {
