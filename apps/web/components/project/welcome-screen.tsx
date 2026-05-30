@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { DirectoryBrowserModal } from "./directory-browser-modal";
 import { basename } from "@/lib/project/path-utils";
+import packageJson from "@/package.json";
 
 interface WelcomeScreenProps {
   recent: string[];
@@ -117,6 +118,8 @@ export function WelcomeScreen({ recent }: WelcomeScreenProps) {
       </div>
 
       <footer className="absolute right-0 bottom-0 left-0 flex items-center justify-center gap-2 py-4 text-muted-foreground text-xs">
+        <span>OpenLaTex v{packageJson.version}</span>
+        <span>·</span>
         <span>by xTazah</span>
         <span>·</span>
         <a

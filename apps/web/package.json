@@ -1,6 +1,6 @@
 {
   "name": "@openlatex/web",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "private": true,
   "description": "Local filesystem-backed LaTeX editor with live preview and Git integration",
   "homepage": "https://github.com/xTazah/OpenLatex",

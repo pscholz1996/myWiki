@@ -19,9 +19,11 @@ import {
   PanelResizeHandle,
   type ImperativePanelHandle,
 } from "react-resizable-panels";
+import { toast } from "sonner";
 import { useFsStore } from "@/stores/fs-store";
 import { useEditorStore } from "@/stores/editor-store";
 import { usePdfStore } from "@/stores/pdf-store";
+import { describeOutcome, syncForward } from "@/lib/synctex";
 import { Button } from "@/components/ui/button";
 import { FileTree } from "./file-tree";
 import { SourceControl } from "./source-control";
@@ -96,11 +98,28 @@ export function Sidebar() {
     return parts[parts.length - 1] ?? "Project";
   }, [root]);
 
-  const handleTocClick = useCallback((title: string) => {
-    const pdf = usePdfStore.getState();
-    const page = pdf.findPage(title);
-    if (page) pdf.setScrollToPage(page);
-  }, []);
+  const handleTocClick = useCallback(
+    async (line: number) => {
+      if (!activePath) return;
+      const outcome = await syncForward(activePath, line, 0);
+      if (outcome.kind === "ok") {
+        const { page, h, v, width, height } = outcome.value;
+        usePdfStore.getState().setSynctexHighlight({
+          page,
+          x: h,
+          y: v,
+          width,
+          height,
+          key: Date.now(),
+        });
+        usePdfStore.getState().setScrollToPage(page);
+      } else {
+        const msg = describeOutcome(outcome);
+        if (msg) toast(msg);
+      }
+    },
+    [activePath],
+  );
 
   return (
     <div className="flex h-full flex-col bg-sidebar text-sidebar-foreground">
@@ -238,7 +257,7 @@ export function Sidebar() {
                   key={index}
                   className="flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-sm transition-colors hover:bg-sidebar-accent/50"
                   style={{ paddingLeft: `${(item.level - 1) * 12 + 8}px` }}
-                  onClick={() => handleTocClick(item.title)}
+                  onClick={() => handleTocClick(item.line)}
                 >
                   <HashIcon className="size-3 shrink-0 text-muted-foreground" />
                   <span className="truncate">{item.title}</span>

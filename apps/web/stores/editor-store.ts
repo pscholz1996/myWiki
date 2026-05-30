@@ -1,16 +1,15 @@
 import { create } from "zustand";
 import { readFile, writeFile } from "@/lib/fs/fs-client";
-import { usePdfStore } from "@/stores/pdf-store";
-
-/** Extract the first \chapter{...} or \section{...} title from LaTeX content. */
-function extractFirstHeading(content: string): string | null {
-  const match = content.match(
-    /\\(?:chapter|section|subsection)\*?\s*\{([^}]+)\}/,
-  );
-  return match ? match[1].trim() : null;
-}
 
 const WRITE_DEBOUNCE_MS = 300;
+
+/** A pending request to move the editor cursor to (line, column) and flash. */
+export interface GoToLineRequest {
+  line: number; // 1-based
+  column: number; // 0-based
+  /** Bumped on each request so identical line/column still re-flashes. */
+  key: number;
+}
 
 interface EditorState {
   activePath: string | null;
@@ -25,6 +24,10 @@ interface EditorState {
   loading: boolean;
   loadError: string | null;
   saveError: string | null;
+  /** Most recent goto-line request; the LatexEditor effect consumes it. */
+  pendingGoTo: GoToLineRequest | null;
+  /** Most recent line to flash; same key pattern as pendingGoTo. */
+  flashLine: { line: number; key: number } | null;
 
   openFile: (path: string) => Promise<void>;
   closeFile: () => void;
@@ -33,6 +36,15 @@ interface EditorState {
   reloadFromDisk: () => Promise<void>;
   /** Called by the fs-watcher when the active file was deleted externally. */
   handleExternalDelete: () => void;
+  /**
+   * Open `path` if not already active, then place the cursor at (line, column)
+   * and flash the line. Used by SyncTeX inverse search.
+   */
+  goToLocation: (path: string, line: number, column: number) => Promise<void>;
+  /** Clear the pending goto request after the editor consumes it. */
+  clearPendingGoTo: () => void;
+  /** Clear the flash-line marker after the animation finishes. */
+  clearFlashLine: () => void;
 }
 
 let writeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -64,6 +76,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   loading: false,
   loadError: null,
   saveError: null,
+  pendingGoTo: null,
+  flashLine: null,
 
   async openFile(path) {
     if (writeTimer) {
@@ -85,15 +99,6 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       const res = await readFile(path);
       if (res.type === "text") {
         set({ activeKind: "text", buffer: res.content, loading: false });
-        // If sync-scroll is enabled, look up the first heading in the pre-built outline map.
-        const pdf = usePdfStore.getState();
-        if (pdf.syncScrollEnabled && pdf.pdfData) {
-          const heading = extractFirstHeading(res.content);
-          if (heading) {
-            const page = pdf.findPage(heading);
-            if (page) pdf.setScrollToPage(page);
-          }
-        }
       } else {
         set({
           activeKind: "binary",
@@ -154,5 +159,25 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       activeDataUrl: null,
       writePending: false,
     });
+  },
+
+  async goToLocation(path, line, column) {
+    const { activePath } = get();
+    if (activePath !== path) {
+      await get().openFile(path);
+    }
+    const key = Date.now();
+    set({
+      pendingGoTo: { line, column, key },
+      flashLine: { line, key },
+    });
+  },
+
+  clearPendingGoTo() {
+    set({ pendingGoTo: null });
+  },
+
+  clearFlashLine() {
+    set({ flashLine: null });
   },
 }));

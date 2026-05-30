@@ -1,4 +1,9 @@
-export async function compileLatex(): Promise<Uint8Array> {
+export interface CompileResult {
+  data: Uint8Array;
+  buildId: string | null;
+}
+
+export async function compileLatex(): Promise<CompileResult> {
   const response = await fetch("/api/compile", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -13,5 +18,9 @@ export async function compileLatex(): Promise<Uint8Array> {
   }
 
   const arrayBuffer = await response.arrayBuffer();
-  return new Uint8Array(arrayBuffer);
+  const buildId = response.headers.get("x-build-id");
+  return {
+    data: new Uint8Array(arrayBuffer),
+    buildId: buildId && buildId.length > 0 ? buildId : null,
+  };
 }

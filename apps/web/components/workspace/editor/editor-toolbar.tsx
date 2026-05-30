@@ -14,7 +14,11 @@ import {
   ImageIcon,
   MinusIcon,
   PlusIcon,
+  CrosshairIcon,
 } from "lucide-react";
+import { toast } from "sonner";
+import { describeOutcome, syncForward } from "@/lib/synctex";
+import { usePdfStore } from "@/stores/pdf-store";
 import { TooltipIconButton } from "@/components/ui/tooltip-icon-button";
 import { Button } from "@/components/ui/button";
 import {
@@ -80,6 +84,30 @@ export function EditorToolbar({
 
   const zoomIn = () => onImageScaleChange?.(Math.min(4, imageScale + 0.25));
   const zoomOut = () => onImageScaleChange?.(Math.max(0.25, imageScale - 0.25));
+
+  const handleSyncToPdf = async () => {
+    const view = editorView.current;
+    if (!view || !activePath) return;
+    const pos = view.state.selection.main.head;
+    const line = view.state.doc.lineAt(pos);
+    const column = pos - line.from;
+    const outcome = await syncForward(activePath, line.number, column);
+    if (outcome.kind === "ok") {
+      const { page, h, v, width, height } = outcome.value;
+      usePdfStore.getState().setSynctexHighlight({
+        page,
+        x: h,
+        y: v,
+        width,
+        height,
+        key: Date.now(),
+      });
+      usePdfStore.getState().setScrollToPage(page);
+    } else {
+      const msg = describeOutcome(outcome);
+      if (msg) toast(msg);
+    }
+  };
 
   if (fileType === "image") {
     return (
@@ -185,6 +213,13 @@ export function EditorToolbar({
         onClick={() => insertText("\\[\n  ", "\n\\]")}
       >
         <span className="font-mono text-xs">∫</span>
+      </TooltipIconButton>
+      <div className="mx-2 h-4 w-px bg-border" />
+      <TooltipIconButton
+        tooltip="Jump to PDF (Ctrl+Alt+J)"
+        onClick={handleSyncToPdf}
+      >
+        <CrosshairIcon className="size-4" />
       </TooltipIconButton>
     </div>
   );

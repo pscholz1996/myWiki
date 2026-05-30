@@ -114,6 +114,7 @@ export async function POST() {
     }
 
     const pdfBuffer = Buffer.from(await response.arrayBuffer());
+    const buildId = response.headers.get("x-build-id") ?? "";
 
     // Persist to .openlatex/out.pdf so next startup can show it instantly.
     // Use path.join for filesystem ops (handles spaces correctly on Windows),
@@ -123,12 +124,12 @@ export async function POST() {
     echo.recordWrite(outPathPosix); // prevent the watcher from forwarding our own write
     await fs.writeFile(outPath, pdfBuffer);
 
-    return new NextResponse(pdfBuffer, {
-      headers: {
-        "Content-Type": "application/pdf",
-        "Content-Disposition": "inline; filename=document.pdf",
-      },
-    });
+    const headers: Record<string, string> = {
+      "Content-Type": "application/pdf",
+      "Content-Disposition": "inline; filename=document.pdf",
+    };
+    if (buildId) headers["X-Build-Id"] = buildId;
+    return new NextResponse(pdfBuffer, { headers });
   } catch (error) {
     if (error instanceof NoProjectSelectedError) {
       return NextResponse.json(

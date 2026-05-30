@@ -30,8 +30,9 @@ export function useFsStartup() {
       const pdf = usePdfStore.getState();
       pdf.setIsCompiling(true);
       try {
-        const data = await compileLatex();
-        pdf.setPdfData(data);
+        const result = await compileLatex();
+        pdf.setPdfData(result.data);
+        pdf.setBuildId(result.buildId);
       } catch (error) {
         pdf.setCompileError(
           error instanceof Error ? error.message : "Compile failed",

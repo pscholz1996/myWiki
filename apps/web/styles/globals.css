@@ -136,3 +136,28 @@
   background-color: oklch(0.9 0.1 250 / 30%);
   border-radius: 2px;
 }
+
+
+/* SyncTeX forward-sync flash overlay (PdfViewer) */
+@keyframes synctex-flash {
+  0% { opacity: 0; }
+  15% { opacity: 1; }
+  100% { opacity: 0; }
+}
+.synctex-flash {
+  background: rgba(255, 220, 0, 0.45);
+  border: 1px solid rgba(200, 160, 0, 0.75);
+  border-radius: 2px;
+  animation: synctex-flash 1.6s ease-out forwards;
+}
+
+/* SyncTeX inverse-sync flash highlight on the editor line (LatexEditor) */
+@keyframes synctex-line-flash {
+  0% { background-color: rgba(255, 220, 0, 0); }
+  15% { background-color: rgba(255, 220, 0, 0.55); }
+  100% { background-color: rgba(255, 220, 0, 0); }
+}
+.cm-line.synctex-line-flash {
+  animation: synctex-line-flash 1.6s ease-out forwards;
+}
+
