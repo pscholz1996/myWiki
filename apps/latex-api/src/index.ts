@@ -175,7 +175,7 @@ function parseSyncTeXEdit(
 }
 
 app.use("/*", cors({ origin: "*", exposeHeaders: ["X-Build-Id"] }));
-app.use("/*", bodyLimit({ maxSize: 10 * 1024 * 1024 }));
+app.use("/*", bodyLimit({ maxSize: 50 * 1024 * 1024 }));
 
 interface Resource {
   path?: string;
