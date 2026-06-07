@@ -92,6 +92,20 @@ export function useFsStartup() {
         if (res.ok) {
           const buf = await res.arrayBuffer();
           pdf.setPdfData(new Uint8Array(buf));
+          // Register the persisted SyncTeX data with the latex-api so sync works
+          // against the cached PDF without recompiling. Best-effort: if there's
+          // no cached .synctex.gz, sync will prompt to compile (prior behavior).
+          try {
+            const reg = await fetch("/api/synctex/register", {
+              method: "POST",
+            });
+            if (reg.ok) {
+              const { buildId } = (await reg.json()) as { buildId?: string };
+              if (buildId) pdf.setBuildId(buildId);
+            }
+          } catch {
+            // ignore — sync registration is best-effort
+          }
           return;
         }
       } catch {

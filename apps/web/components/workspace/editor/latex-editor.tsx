@@ -199,14 +199,10 @@ export function LatexEditor() {
   }, [activePath]);
 
   /**
-   * Last forward-sync we issued. `lastAutoSyncedLine` deduplicates the
-   * auto-sync trigger so caret motion within a line doesn't re-fire it, and
-   * `suppressNextAutoSync` blocks one round of auto-sync after an inverse-sync
-   * jump (otherwise the cursor landing on the new line would immediately
-   * bounce the PDF back to the original spot).
+   * Auto-sync fires only on typing (doc changes) and explicit double-click —
+   * never on plain caret motion / single click. The debounce timer coalesces
+   * rapid edits into one forward-sync.
    */
-  const lastAutoSyncedLineRef = useRef<number>(0);
-  const suppressNextAutoSyncRef = useRef(false);
   const autoSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const triggerForwardSync = (
@@ -218,7 +214,6 @@ export function LatexEditor() {
     const pos = view.state.selection.main.head;
     const line = view.state.doc.lineAt(pos);
     const column = pos - line.from;
-    lastAutoSyncedLineRef.current = line.number;
     syncForward(path, line.number, column).then((outcome) => {
       if (outcome.kind === "ok") {
         const { page, h, v, width, height } = outcome.value;
@@ -336,28 +331,21 @@ export function LatexEditor() {
         setBuffer(update.state.doc.toString());
       }
 
-      // Auto-forward-sync: trigger when the cursor lands on a new line
-      // (either via click / arrow keys / programmatic selection) or when the
-      // user edits the document. Within-line caret motion does not re-fire,
-      // since it would just produce the same PDF position.
-      if (update.docChanged || update.selectionSet) {
-        if (suppressNextAutoSyncRef.current) {
-          // The inverse-sync goToLocation just moved the cursor. Record the
-          // new line as already-synced so we don't bounce back to the
-          // original PDF spot, then drop the guard.
-          const head = update.state.selection.main.head;
-          lastAutoSyncedLineRef.current = update.state.doc.lineAt(head).number;
-          suppressNextAutoSyncRef.current = false;
-          return;
-        }
-        const head = update.state.selection.main.head;
-        const lineNum = update.state.doc.lineAt(head).number;
-        const shouldSync =
-          update.docChanged || lineNum !== lastAutoSyncedLineRef.current;
-        if (shouldSync) {
-          scheduleAutoSync(update.view);
-        }
+      // Auto-forward-sync on edits only. Plain caret motion / single click /
+      // arrow keys deliberately do NOT sync — that would yank the PDF around as
+      // the user navigates. Jumping to a spot on demand is done by double-click
+      // (see dblclick handler below) or the Ctrl-Alt-J shortcut.
+      if (update.docChanged) {
+        scheduleAutoSync(update.view);
       }
+    });
+
+    // Double-click in the editor jumps the PDF to that location.
+    const dblclickListener = EditorView.domEventHandlers({
+      dblclick: (_, view) => {
+        triggerForwardSync(view);
+        return false; // let CodeMirror keep its default word-selection behavior
+      },
     });
 
     const scrollListener = EditorView.domEventHandlers({
@@ -450,6 +438,7 @@ export function LatexEditor() {
         lineFlashField,
         updateListener,
         scrollListener,
+        dblclickListener,
         EditorView.lineWrapping,
         scrollPastEnd(),
         EditorView.theme({
@@ -488,7 +477,6 @@ export function LatexEditor() {
         clearTimeout(autoSyncTimerRef.current);
         autoSyncTimerRef.current = null;
       }
-      lastAutoSyncedLineRef.current = 0;
       view.destroy();
       viewRef.current = null;
     };
@@ -504,10 +492,9 @@ export function LatexEditor() {
     const line = doc.line(lineNum);
     const column = Math.max(0, Math.min(pendingGoTo.column, line.length));
     const pos = line.from + column;
-    // Block the next auto-forward-sync triggered by this selection change —
-    // otherwise the cursor landing on the inverse-resolved line would
-    // immediately bounce the PDF back to where the user clicked.
-    suppressNextAutoSyncRef.current = true;
+    // No auto-sync guard needed here: selection changes no longer trigger
+    // forward-sync (only edits and double-click do), so moving the cursor for
+    // an inverse jump won't bounce the PDF back.
     view.dispatch({
       selection: { anchor: pos },
       effects: EditorView.scrollIntoView(pos, { y: "center" }),

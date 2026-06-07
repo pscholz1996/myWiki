@@ -119,10 +119,37 @@ export async function POST() {
     // Persist to .openlatex/out.pdf so next startup can show it instantly.
     // Use path.join for filesystem ops (handles spaces correctly on Windows),
     // then normalize to POSIX for echo tracker.
-    const outPath = path.join(projectDir, BUILD_DIR_NAME, "out.pdf");
+    const buildDir = path.join(projectDir, BUILD_DIR_NAME);
+    const outPath = path.join(buildDir, "out.pdf");
     const outPathPosix = outPath.replace(/\\/g, "/");
     echo.recordWrite(outPathPosix); // prevent the watcher from forwarding our own write
     await fs.writeFile(outPath, pdfBuffer);
+
+    // Also persist the SyncTeX data so the cached PDF can be synced at the next
+    // startup without recompiling. Ask the latex-api for a path-rewritten
+    // `.synctex.gz` (recorded tmp-workdir paths remapped onto our build dir) and
+    // write it next to out.pdf. Best-effort: a failure here just means sync will
+    // require a recompile, same as before.
+    if (buildId) {
+      try {
+        const sxRes = await fetch(
+          `${latexApiUrl}/builds/${buildId}/synctex`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ targetDir: buildDir }),
+          },
+        );
+        if (sxRes.ok) {
+          const gzBuffer = Buffer.from(await sxRes.arrayBuffer());
+          const gzPath = path.join(buildDir, "out.synctex.gz");
+          echo.recordWrite(gzPath.replace(/\\/g, "/"));
+          await fs.writeFile(gzPath, gzBuffer);
+        }
+      } catch {
+        // ignore — synctex persistence is best-effort
+      }
+    }
 
     const headers: Record<string, string> = {
       "Content-Type": "application/pdf",

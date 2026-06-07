@@ -7,6 +7,7 @@ import { dirname, join, resolve, sep, relative, isAbsolute } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
+import { gunzipSync, gzipSync } from "node:zlib";
 
 const app = new Hono();
 
@@ -24,6 +25,12 @@ interface RetainedBuild {
   workDir: string;
   mainFileName: string; // without .tex extension
   createdAt: number;
+  /**
+   * True for disk-backed builds registered via /builds/register, whose workDir
+   * is a caller-owned directory (the project's persisted build dir). Eviction
+   * must NOT delete it — only drop the in-memory entry.
+   */
+  persistent?: boolean;
 }
 
 const builds = new Map<string, RetainedBuild>();
@@ -33,11 +40,14 @@ async function evictStaleBuilds() {
   const now = Date.now();
   const entries = [...builds.entries()];
 
-  // Drop anything older than TTL.
+  // Drop anything older than TTL. Persistent (disk-backed) builds own their
+  // workDir — only forget the entry, never delete the directory.
   for (const [id, b] of entries) {
     if (now - b.createdAt > BUILD_TTL_MS) {
       builds.delete(id);
-      await rm(b.workDir, { recursive: true, force: true }).catch(() => {});
+      if (!b.persistent) {
+        await rm(b.workDir, { recursive: true, force: true }).catch(() => {});
+      }
     }
   }
 
@@ -54,7 +64,7 @@ async function evictStaleBuilds() {
     if (!oldestId) break;
     const dropped = builds.get(oldestId);
     builds.delete(oldestId);
-    if (dropped) {
+    if (dropped && !dropped.persistent) {
       await rm(dropped.workDir, { recursive: true, force: true }).catch(
         () => {},
       );
@@ -533,6 +543,99 @@ app.post("/synctex/inverse", async (c) => {
     line: parsed.line,
     column: parsed.column,
   });
+});
+
+/**
+ * Return this build's `.synctex.gz` with its recorded paths rewritten so the
+ * caller can persist it next to a relocated/renamed PDF and still query it.
+ *
+ * SyncTeX records native absolute source paths at compile time (the tmp
+ * workDir). When the build is later replayed from disk (e.g. the project's
+ * persisted `out.pdf` + `out.synctex.gz`), forward sync's `-i` input path must
+ * match those recorded strings. We rewrite the workDir prefix → the caller's
+ * `targetDir`, and the `Output:` PDF basename `<mainFileName>.pdf` → `out.pdf`,
+ * so the persisted build resolves with `workDir = targetDir`, mainFileName="out".
+ */
+interface SyncRewriteRequest {
+  targetDir: string; // absolute dir where out.pdf + out.synctex.gz will live
+}
+
+app.post("/builds/:id/synctex", async (c) => {
+  const id = c.req.param("id");
+  const build = builds.get(id);
+  if (!build) {
+    return c.json({ error: "build-not-found" }, 404);
+  }
+  const body = await c.req.json<SyncRewriteRequest>().catch(() => null);
+  if (!body || !body.targetDir) {
+    return c.json({ error: "invalid-request" }, 400);
+  }
+
+  const synctexPath = join(build.workDir, `${build.mainFileName}.synctex.gz`);
+  let raw: Buffer;
+  try {
+    raw = await readFile(synctexPath);
+  } catch {
+    return c.json({ error: "synctex-disabled" }, 422);
+  }
+
+  let text = gunzipSync(raw).toString("utf-8");
+  // Rewrite the recorded source prefix (tmp workDir) → the persisted target dir,
+  // and the PDF basename → out.pdf, preserving native separators.
+  const fromPrefix = build.workDir.endsWith(sep)
+    ? build.workDir
+    : `${build.workDir}${sep}`;
+  const toPrefix = body.targetDir.endsWith(sep)
+    ? body.targetDir
+    : `${body.targetDir}${sep}`;
+  text = text.split(fromPrefix).join(toPrefix);
+  text = text.split(`${build.mainFileName}.pdf`).join("out.pdf");
+
+  const out = gzipSync(Buffer.from(text, "utf-8"));
+  return new Response(out, {
+    headers: { "Content-Type": "application/gzip" },
+  });
+});
+
+/**
+ * Register a disk-backed build so SyncTeX queries can run against a persisted
+ * `out.pdf` + `out.synctex.gz` (e.g. the cached PDF loaded at startup) without
+ * recompiling. The caller passes the absolute directory containing those files.
+ * Local single-machine app: trusting an absolute path from the co-located web
+ * server is acceptable.
+ */
+interface RegisterRequest {
+  workDir: string; // absolute dir containing out.pdf + out.synctex.gz
+  mainFileName: string; // e.g. "out"
+}
+
+app.post("/builds/register", async (c) => {
+  const body = await c.req.json<RegisterRequest>().catch(() => null);
+  if (!body || !body.workDir || !body.mainFileName) {
+    return c.json({ error: "invalid-request" }, 400);
+  }
+  const pdfPath = join(body.workDir, `${body.mainFileName}.pdf`);
+  const gzPath = join(body.workDir, `${body.mainFileName}.synctex.gz`);
+  const ok =
+    (await access(pdfPath)
+      .then(() => true)
+      .catch(() => false)) &&
+    (await access(gzPath)
+      .then(() => true)
+      .catch(() => false));
+  if (!ok) {
+    return c.json({ error: "artifacts-missing" }, 404);
+  }
+
+  const buildId = randomUUID();
+  builds.set(buildId, {
+    workDir: body.workDir,
+    mainFileName: body.mainFileName,
+    createdAt: Date.now(),
+    persistent: true,
+  });
+  evictStaleBuilds().catch(() => {});
+  return c.json({ buildId });
 });
 
 const port = parseInt(process.env.PORT || "3001", 10);
