@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { gunzipSync, gzipSync } from "node:zlib";
+import { pathToFileURL } from "node:url";
 
 const app = new Hono();
 
@@ -70,6 +71,33 @@ async function evictStaleBuilds() {
       );
     }
   }
+}
+
+/**
+ * Decide which bibliography processor to run after the first LaTeX pass.
+ *
+ * The choice is driven by what the first pass actually emitted, mirroring how
+ * latexmk decides:
+ *   - biblatex with its (default) Biber backend writes a `.bcf` control file →
+ *     run `biber`. Running `bibtex` here is a no-op and leaves no `.bbl`, which
+ *     is why a biblatex+biber document renders an *empty* bibliography.
+ *   - classic BibTeX (and biblatex's `backend=bibtex`) records `\bibdata` /
+ *     `\citation` lines in the `.aux` → run `bibtex`.
+ *   - neither signal present → no bibliography step is needed.
+ *
+ * Pure and synchronous so it can be unit-tested without TeX or the filesystem.
+ */
+export function chooseBibTool(input: {
+  bcfExists: boolean;
+  auxText: string | null;
+}): "biber" | "bibtex" | "none" {
+  // A `.bcf` is the authoritative signal for the Biber backend; it wins even if
+  // an `.aux` is also present (biblatex still writes citation data to `.aux`).
+  if (input.bcfExists) return "biber";
+  if (input.auxText && /\\(bibdata|citation|bibstyle)\b/.test(input.auxText)) {
+    return "bibtex";
+  }
+  return "none";
 }
 
 /** Parse a LaTeX log for missing .sty / .cls files */
@@ -238,8 +266,6 @@ app.post("/builds/sync", async (c) => {
 
   activeCompilations++;
   try {
-    const hasBib = resources.some((r) => r.path?.endsWith(".bib"));
-
     for (const resource of resources) {
       const filePath =
         resource.path || (resource.main ? "main.tex" : `file-${randomUUID()}`);
@@ -322,33 +348,45 @@ app.post("/builds/sync", async (c) => {
       return { timedOut: false };
     };
 
-    if (hasBib) {
-      const first = await firstPassWithAutoInstall();
-      if (first.timedOut) {
+    const first = await firstPassWithAutoInstall();
+    if (first.timedOut) {
+      return c.json(
+        { error: "Compilation timed out" } satisfies CompileError,
+        500,
+      );
+    }
+
+    // Decide the bibliography step from what the first pass actually emitted,
+    // not from whether a `.bib` was uploaded. A biblatex+biber document writes
+    // a `.bcf` and must be processed with `biber`; running `bibtex` on it is a
+    // no-op that leaves no `.bbl`, producing an empty bibliography.
+    const bcfPath = join(workDir, `${mainFileName}.bcf`);
+    const auxPath = join(workDir, `${mainFileName}.aux`);
+    const bcfExists = await access(bcfPath)
+      .then(() => true)
+      .catch(() => false);
+    let auxText: string | null = null;
+    try {
+      auxText = await readFile(auxPath, "utf-8");
+    } catch {}
+    const bibTool = chooseBibTool({ bcfExists, auxText });
+
+    if (bibTool !== "none") {
+      // biber takes the jobname without extension; bibtex takes the .aux stem.
+      const result = await runWithTimeout([bibTool, mainFileName]);
+      if (result.timedOut) {
         return c.json(
-          { error: "Compilation timed out" } satisfies CompileError,
+          {
+            error: bibTool === "biber" ? "Biber timed out" : "BibTeX timed out",
+          } satisfies CompileError,
           500,
         );
       }
 
-      const auxPath = join(workDir, `${mainFileName}.aux`);
-      const auxExists = await access(auxPath)
-        .then(() => true)
-        .catch(() => false);
-      let result;
-      if (auxExists) {
-        result = await runWithTimeout(["bibtex", mainFileName]);
-        if (result.timedOut) {
-          return c.json(
-            { error: "BibTeX timed out" } satisfies CompileError,
-            500,
-          );
-        }
-      }
-
+      // Two more passes so the bibliography and back-references resolve.
       for (let i = 0; i < 2; i++) {
-        result = await runWithTimeout(latexCmd);
-        if (result.timedOut) {
+        const pass = await runWithTimeout(latexCmd);
+        if (pass.timedOut) {
           return c.json(
             { error: "Compilation timed out" } satisfies CompileError,
             500,
@@ -356,15 +394,7 @@ app.post("/builds/sync", async (c) => {
         }
       }
     } else {
-      const first = await firstPassWithAutoInstall();
-      if (first.timedOut) {
-        return c.json(
-          { error: "Compilation timed out" } satisfies CompileError,
-          500,
-        );
-      }
-
-      // Second pass (resolves cross-references)
+      // No bibliography: one extra pass resolves cross-references.
       const result = await runWithTimeout(latexCmd);
       if (result.timedOut) {
         return c.json(
@@ -638,11 +668,22 @@ app.post("/builds/register", async (c) => {
   return c.json({ buildId });
 });
 
-const port = parseInt(process.env.PORT || "3001", 10);
+/**
+ * Start the HTTP server only when run as the entry point — not when the module
+ * is imported (e.g. by unit tests for the pure helpers above), which would
+ * otherwise bind the port as a side effect of import.
+ */
+const isEntryPoint =
+  process.argv[1] != null &&
+  import.meta.url === pathToFileURL(process.argv[1]).href;
 
-serve({
-  fetch: app.fetch,
-  port,
-});
+if (isEntryPoint) {
+  const port = parseInt(process.env.PORT || "3001", 10);
 
-console.log(`LaTeX API server running on port ${port}`);
+  serve({
+    fetch: app.fetch,
+    port,
+  });
+
+  console.log(`LaTeX API server running on port ${port}`);
+}
