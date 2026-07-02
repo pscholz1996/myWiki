@@ -93,12 +93,19 @@ export function AiPanel() {
     if (files.length === 0) return;
 
     try {
-      await uploadSources(files);
-      toast.success(
-        `Uploaded ${files.length} source${files.length === 1 ? "" : "s"}`,
-      );
+      const rejected = await uploadSources(files);
+      const acceptedCount = files.length - rejected.length;
+
+      if (acceptedCount > 0) {
+        toast.success(
+          `Uploaded ${acceptedCount} source${acceptedCount === 1 ? "" : "s"}`,
+        );
+      }
+      for (const file of rejected) {
+        toast.error(`Skipped ${file.name}`, { description: file.reason });
+      }
     } catch {
-      // Store already captures the error.
+      // Store already captures the error (e.g. every file was rejected).
     }
   };
 

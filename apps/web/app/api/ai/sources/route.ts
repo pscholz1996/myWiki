@@ -34,8 +34,16 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "No files uploaded" }, { status: 400 });
     }
 
-    const manifest = await uploadAiSources(projectDir, files);
-    return NextResponse.json(manifest, { status: 201 });
+    const { manifest, rejected } = await uploadAiSources(projectDir, files);
+
+    if (rejected.length === files.length) {
+      return NextResponse.json(
+        { error: "No files were accepted", rejected },
+        { status: 400 },
+      );
+    }
+
+    return NextResponse.json({ ...manifest, rejected }, { status: 201 });
   } catch (error) {
     if (error instanceof NoProjectSelectedError) {
       return NextResponse.json(

@@ -82,6 +82,15 @@ export interface AiManifest {
   };
 }
 
+export interface AiRejectedSourceFile {
+  name: string;
+  reason: string;
+}
+
+export interface AiUploadResult extends AiManifest {
+  rejected: AiRejectedSourceFile[];
+}
+
 export interface AiChatRequest {
   conversationId?: string;
   message: string;

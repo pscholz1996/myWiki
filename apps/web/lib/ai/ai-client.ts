@@ -4,15 +4,18 @@ import type {
   AiConversation,
   AiConversationSummary,
   AiManifest,
+  AiRejectedSourceFile,
+  AiUploadResult,
 } from "@/lib/ai/types";
 
 function errFrom(res: Response): Promise<Error> {
   return res
     .json()
-    .then(
-      (data: { error?: string }) =>
-        new Error(data.error ?? `HTTP ${res.status}`),
-    )
+    .then((data: { error?: string; rejected?: AiRejectedSourceFile[] }) => {
+      const reasons = data.rejected?.map((r) => `${r.name}: ${r.reason}`).join("; ");
+      const message = reasons ? `${data.error ?? "Upload failed"} (${reasons})` : data.error;
+      return new Error(message ?? `HTTP ${res.status}`);
+    })
     .catch(() => new Error(`HTTP ${res.status}`));
 }
 
@@ -26,7 +29,7 @@ export async function fetchAiManifest(): Promise<AiManifest> {
   return getJson<AiManifest>("/api/ai/sources");
 }
 
-export async function uploadAiSources(files: File[]): Promise<AiManifest> {
+export async function uploadAiSources(files: File[]): Promise<AiUploadResult> {
   const formData = new FormData();
   for (const file of files) {
     formData.append("files", file);
@@ -38,7 +41,7 @@ export async function uploadAiSources(files: File[]): Promise<AiManifest> {
   });
 
   if (!res.ok) throw await errFrom(res);
-  return res.json() as Promise<AiManifest>;
+  return res.json() as Promise<AiUploadResult>;
 }
 
 export async function deleteAiSource(sourceId: string): Promise<AiManifest> {

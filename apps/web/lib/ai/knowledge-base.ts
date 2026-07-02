@@ -56,6 +56,14 @@ const CHUNKS_FILE = "chunks.jsonl";
 const EMBEDDINGS_FILE = "embeddings.bin";
 const EMBEDDING_MODEL = "Xenova/all-MiniLM-L6-v2";
 
+// Anything outside this set falls through extractSourceText's non-PDF
+// branch, which reads the raw bytes as UTF-8 "text" — for a real binary
+// file (.docx, .png, a zip) that produces garbage that still gets chunked,
+// embedded, and surfaced in search results and citations. Reject it up
+// front instead of silently indexing noise.
+export const ALLOWED_SOURCE_EXTS = new Set([".pdf", ".md", ".txt"]);
+export const MAX_SOURCE_BYTES = 50 * 1024 * 1024; // 50MB — generous for a single paper
+
 let embeddingPipelinePromise: Promise<
   (
     texts: string[],
@@ -519,18 +527,46 @@ async function removeSourceFromIndex(
   });
 }
 
+export interface RejectedSourceFile {
+  name: string;
+  reason: string;
+}
+
+export interface UploadAiSourcesResult {
+  manifest: AiManifest;
+  rejected: RejectedSourceFile[];
+}
+
 export async function uploadAiSources(
   projectDir: string,
   files: File[],
-): Promise<AiManifest> {
+): Promise<UploadAiSourcesResult> {
   const { sourcesDir, indexDir } = await ensureAiWorkspace(projectDir);
   await fs.mkdir(indexDir, { recursive: true });
 
   const newSources: AiSourceRecord[] = [];
+  const rejected: RejectedSourceFile[] = [];
 
   for (const file of files) {
     const originalName = sanitizeFileName(file.name);
     const ext = path.extname(originalName).toLowerCase();
+
+    if (!ALLOWED_SOURCE_EXTS.has(ext)) {
+      rejected.push({
+        name: originalName,
+        reason: `Unsupported file type "${ext || "(none)"}" — only PDF, Markdown, and plain text are accepted`,
+      });
+      continue;
+    }
+
+    if (file.size > MAX_SOURCE_BYTES) {
+      rejected.push({
+        name: originalName,
+        reason: `File is ${Math.round(file.size / 1024 / 1024)}MB, over the ${MAX_SOURCE_BYTES / 1024 / 1024}MB limit`,
+      });
+      continue;
+    }
+
     const id = crypto.randomUUID();
     const bytes = new Uint8Array(await file.arrayBuffer());
     const saved = await saveSourceFile(sourcesDir, id, originalName, bytes);
@@ -547,8 +583,11 @@ export async function uploadAiSources(
     });
   }
 
-  await appendSourcesToIndex(projectDir, newSources);
-  return readManifest(projectDir);
+  if (newSources.length > 0) {
+    await appendSourcesToIndex(projectDir, newSources);
+  }
+
+  return { manifest: await readManifest(projectDir), rejected };
 }
 
 export async function deleteAiSource(

@@ -6,6 +6,7 @@ import type {
   AiConversationSummary,
   AiManifest,
   AiMessage,
+  AiRejectedSourceFile,
   AiSourceRecord,
 } from "@/lib/ai/types";
 import {
@@ -31,7 +32,7 @@ interface AiState {
   chatLoading: boolean;
   loadSources: () => Promise<void>;
   loadConversations: () => Promise<void>;
-  uploadSources: (files: File[]) => Promise<void>;
+  uploadSources: (files: File[]) => Promise<AiRejectedSourceFile[]>;
   removeSource: (sourceId: string) => Promise<void>;
   createConversation: (title?: string) => Promise<string>;
   selectConversation: (conversationId: string) => Promise<void>;
@@ -173,11 +174,12 @@ export const useAiStore = create<AiState>((set, get) => ({
     const token = ++sourcesOpSeq;
     set({ actionLoading: true, error: null });
     try {
-      const manifest = await uploadAiSources(files);
-      if (token !== sourcesOpSeq) return;
+      const { rejected, ...manifest } = await uploadAiSources(files);
+      if (token !== sourcesOpSeq) return rejected;
       set({ manifest, sources: manifest.sources });
+      return rejected;
     } catch (error) {
-      if (token !== sourcesOpSeq) return;
+      if (token !== sourcesOpSeq) return [];
       set({
         error:
           error instanceof Error ? error.message : "Failed to upload sources",
