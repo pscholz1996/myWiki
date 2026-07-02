@@ -345,13 +345,188 @@ export async function listAiSources(projectDir: string): Promise<AiManifest> {
   return readManifest(projectDir);
 }
 
+async function extractAndChunkSource(
+  projectDir: string,
+  source: AiSourceRecord,
+): Promise<{ records: AiChunkRecord[]; texts: string[]; pageCount: number | null }> {
+  const sourcePath = path.join(
+    projectDir,
+    ".openlatex",
+    "ai",
+    "sources",
+    source.storedName,
+  );
+  const bytes = await fs.readFile(sourcePath);
+  const extracted = await extractSourceText(
+    source.originalName,
+    new Uint8Array(bytes),
+  );
+
+  const records: AiChunkRecord[] = [];
+  const texts: string[] = [];
+
+  for (const page of extracted.pages) {
+    const pageChunks = chunkText(page.text);
+    for (const [index, chunk] of pageChunks.entries()) {
+      records.push({
+        id: `${source.id}:${page.page ?? 0}:${index}`,
+        sourceId: source.id,
+        sourceFile: source.relativePath,
+        page: page.page,
+        charStart: chunk.charStart,
+        charEnd: chunk.charEnd,
+        text: chunk.text,
+      });
+      texts.push(chunk.text);
+    }
+  }
+
+  return { records, texts, pageCount: extracted.pageCount };
+}
+
+/**
+ * Appends chunks/embeddings for newly-added sources to the existing index
+ * instead of re-extracting and re-embedding the whole corpus. Embedding is
+ * CPU-bound and runs on the main thread, so cost must scale with what
+ * changed, not with total corpus size — otherwise every upload/delete on a
+ * large knowledge base blocks the server for minutes.
+ */
+async function appendSourcesToIndex(
+  projectDir: string,
+  newSources: AiSourceRecord[],
+): Promise<void> {
+  const { indexDir } = await ensureAiWorkspace(projectDir);
+  const chunksPath = path.join(indexDir, CHUNKS_FILE);
+  const embeddingsPath = path.join(indexDir, EMBEDDINGS_FILE);
+
+  const existingChunks = await readJsonLines<AiChunkRecord>(chunksPath);
+  const existingEmbeddings = await readEmbeddingMatrix(embeddingsPath);
+  const manifest = await readManifest(projectDir);
+  const dimensions = manifest.embeddingDimensions ?? 0;
+
+  const newRecords: AiChunkRecord[] = [];
+  const newTexts: string[] = [];
+  const pageCounts = new Map<string, number | null>();
+
+  for (const source of newSources) {
+    const { records, texts, pageCount } = await extractAndChunkSource(
+      projectDir,
+      source,
+    );
+    newRecords.push(...records);
+    newTexts.push(...texts);
+    pageCounts.set(source.id, pageCount);
+  }
+
+  const newVectors = await embedTexts(newTexts);
+  const newDimensions = newVectors[0]?.length ?? dimensions;
+
+  const combinedChunks = [...existingChunks, ...newRecords];
+  await writeJsonLines(chunksPath, combinedChunks);
+
+  const combinedVectorCount =
+    existingChunks.length + newVectors.length;
+  const buffer = Buffer.alloc(combinedVectorCount * newDimensions * 4);
+  const view = new Float32Array(
+    buffer.buffer,
+    buffer.byteOffset,
+    combinedVectorCount * newDimensions,
+  );
+  view.set(existingEmbeddings.subarray(0, existingChunks.length * newDimensions));
+  let offset = existingChunks.length * newDimensions;
+  for (const vector of newVectors) {
+    view.set(vector, offset);
+    offset += newDimensions;
+  }
+  await fs.writeFile(embeddingsPath, buffer);
+
+  await writeManifest(projectDir, {
+    version: 1,
+    updatedAt: nowIso(),
+    embeddingModel: EMBEDDING_MODEL,
+    embeddingDimensions: newDimensions || dimensions || null,
+    sources: [
+      ...manifest.sources,
+      ...newSources.map((source) => ({
+        ...source,
+        pageCount: pageCounts.get(source.id) ?? source.pageCount,
+      })),
+    ],
+    index: {
+      chunkCount: combinedChunks.length,
+      embeddingCount: combinedVectorCount,
+      generatedAt: nowIso(),
+    },
+  });
+}
+
+/**
+ * Removes a source's chunks/embeddings from the index by filtering the
+ * existing arrays — no re-embedding required, since nothing about the
+ * remaining sources changed.
+ */
+async function removeSourceFromIndex(
+  projectDir: string,
+  sourceId: string,
+): Promise<void> {
+  const { indexDir } = await ensureAiWorkspace(projectDir);
+  const chunksPath = path.join(indexDir, CHUNKS_FILE);
+  const embeddingsPath = path.join(indexDir, EMBEDDINGS_FILE);
+
+  const existingChunks = await readJsonLines<AiChunkRecord>(chunksPath);
+  const existingEmbeddings = await readEmbeddingMatrix(embeddingsPath);
+  const manifest = await readManifest(projectDir);
+  const dimensions = manifest.embeddingDimensions ?? 0;
+
+  const keptChunks: AiChunkRecord[] = [];
+  const keptVectors: Float32Array[] = [];
+
+  existingChunks.forEach((chunk, index) => {
+    if (chunk.sourceId === sourceId) return;
+    keptChunks.push(chunk);
+    if (dimensions > 0) {
+      const start = index * dimensions;
+      keptVectors.push(existingEmbeddings.slice(start, start + dimensions));
+    }
+  });
+
+  await writeJsonLines(chunksPath, keptChunks);
+
+  const buffer = Buffer.alloc(keptVectors.length * dimensions * 4);
+  const view = new Float32Array(
+    buffer.buffer,
+    buffer.byteOffset,
+    keptVectors.length * dimensions,
+  );
+  let offset = 0;
+  for (const vector of keptVectors) {
+    view.set(vector, offset);
+    offset += dimensions;
+  }
+  await fs.writeFile(embeddingsPath, buffer);
+
+  await writeManifest(projectDir, {
+    version: 1,
+    updatedAt: nowIso(),
+    embeddingModel: EMBEDDING_MODEL,
+    embeddingDimensions: dimensions || null,
+    sources: manifest.sources.filter((source) => source.id !== sourceId),
+    index: {
+      chunkCount: keptChunks.length,
+      embeddingCount: keptVectors.length,
+      generatedAt: nowIso(),
+    },
+  });
+}
+
 export async function uploadAiSources(
   projectDir: string,
   files: File[],
 ): Promise<AiManifest> {
   const { sourcesDir, indexDir } = await ensureAiWorkspace(projectDir);
-  const manifest = await readManifest(projectDir);
-  const sourceRecords = [...manifest.sources];
+  await fs.mkdir(indexDir, { recursive: true });
+
+  const newSources: AiSourceRecord[] = [];
 
   for (const file of files) {
     const originalName = sanitizeFileName(file.name);
@@ -360,7 +535,7 @@ export async function uploadAiSources(
     const bytes = new Uint8Array(await file.arrayBuffer());
     const saved = await saveSourceFile(sourcesDir, id, originalName, bytes);
 
-    sourceRecords.push({
+    newSources.push({
       id,
       originalName,
       storedName: saved.storedName,
@@ -372,10 +547,8 @@ export async function uploadAiSources(
     });
   }
 
-  const rebuilt = await rebuildAiIndex(projectDir, sourceRecords);
-  await writeManifest(projectDir, rebuilt);
-  await fs.mkdir(indexDir, { recursive: true });
-  return rebuilt;
+  await appendSourcesToIndex(projectDir, newSources);
+  return readManifest(projectDir);
 }
 
 export async function deleteAiSource(
@@ -384,9 +557,6 @@ export async function deleteAiSource(
 ): Promise<AiManifest> {
   const { sourcesDir } = await ensureAiWorkspace(projectDir);
   const manifest = await readManifest(projectDir);
-  const nextSources = manifest.sources.filter(
-    (source) => source.id !== sourceId,
-  );
   const removed = manifest.sources.find((source) => source.id === sourceId);
 
   if (!removed) {
@@ -394,10 +564,8 @@ export async function deleteAiSource(
   }
 
   await fs.rm(path.join(sourcesDir, removed.storedName), { force: true });
-
-  const rebuilt = await rebuildAiIndex(projectDir, nextSources);
-  await writeManifest(projectDir, rebuilt);
-  return rebuilt;
+  await removeSourceFromIndex(projectDir, sourceId);
+  return readManifest(projectDir);
 }
 
 export async function rebuildAiIndex(
