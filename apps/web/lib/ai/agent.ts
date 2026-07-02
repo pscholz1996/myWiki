@@ -44,7 +44,7 @@ function callResult(text: unknown, isError = false): CallToolResult {
  * tool result without re-verifying (confirmed by testing: it will even
  * claim "(verified)" in prose despite calling no tool this turn).
  */
-function findStaleCitedSourceIds(
+export function findStaleCitedSourceIds(
   conversation: AiConversation,
   currentSourceIds: Set<string>,
 ): string[] {
