@@ -1,4 +1,4 @@
-import type { FsNode } from "@/app/api/fs/list/route";
+import type { FsNode } from "@/lib/fs/list";
 
 export type { FsNode };
 

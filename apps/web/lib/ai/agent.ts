@@ -15,6 +15,7 @@ import {
   searchAiKnowledgeBase,
   verifyAiCitation,
 } from "@/lib/ai/knowledge-base";
+import { listProjectTree, type FsNode } from "@/lib/fs/list";
 import { TEXT_EXTS } from "@/lib/fs/project-dir";
 import { resolveInProject } from "@/lib/fs/sandbox";
 import { echo } from "@/lib/fs/watcher";
@@ -85,6 +86,7 @@ async function serializePrompt(
     "You are the OpenLatex AI assistant for scientific writing.",
     "Follow these rules:",
     "- Use the OpenLatex tools to search the knowledge base, read original sources, verify exact quotes, and edit project files.",
+    "- If you don't already know the project's file layout (or need to find where something lives), call list_project_files first instead of guessing paths.",
     "- Never state a source-backed fact unless it has been verified against the original source text.",
     "- When you make a claim from a source, first search the KB, then verify the exact quote on the page with cite().",
     "- Prefer concise answers with explicit citations and page numbers.",
@@ -113,6 +115,22 @@ function normalizeToolResult(value: unknown): CallToolResult {
 
 function getProjectTextPath(absPath: string): string {
   return absPath.replace(/\\/g, "/");
+}
+
+// A nested FsNode tree costs extra tokens re-stating "type"/"children" at
+// every level for what the model really wants: a flat list of paths it can
+// pass straight to read_project_file/edit_project_file. Directories aren't
+// listed themselves since they're never a valid argument to those tools.
+function flattenProjectTree(nodes: FsNode[]): string[] {
+  const paths: string[] = [];
+  for (const node of nodes) {
+    if (node.type === "file") {
+      paths.push(node.path);
+    } else if (node.children) {
+      paths.push(...flattenProjectTree(node.children));
+    }
+  }
+  return paths;
 }
 
 async function readProjectTextFile(
@@ -256,6 +274,24 @@ export function createOpenLatexMcpServer(
               error instanceof Error
                 ? error.message
                 : "Citation verification failed",
+              true,
+            );
+          }
+        },
+      ),
+      tool(
+        "list_project_files",
+        "List every text file path in the current OpenLatex project (e.g. chapters/intro.tex), so you know what exists before reading or editing.",
+        {},
+        async () => {
+          try {
+            const tree = await listProjectTree(projectDir);
+            return normalizeToolResult({ paths: flattenProjectTree(tree) });
+          } catch (error) {
+            return callResult(
+              error instanceof Error
+                ? error.message
+                : "Failed to list project files",
               true,
             );
           }
