@@ -9,6 +9,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import {
   deleteAiSource,
+  listAiSources,
   readAiSourceFull,
   readAiSourcePage,
   searchAiKnowledgeBase,
@@ -34,10 +35,37 @@ function callResult(text: unknown, isError = false): CallToolResult {
   } as CallToolResult;
 }
 
-function serializePrompt(
+/**
+ * Sources cited earlier in this conversation that no longer exist in the
+ * current knowledge base (e.g. the user deleted them because they turned
+ * out to be wrong or irrelevant). A prior verified cite() does not remain
+ * valid after deletion — the model must be told explicitly, by name, or it
+ * will restate the fact from its own conversational memory of the earlier
+ * tool result without re-verifying (confirmed by testing: it will even
+ * claim "(verified)" in prose despite calling no tool this turn).
+ */
+function findStaleCitedSourceIds(
+  conversation: AiConversation,
+  currentSourceIds: Set<string>,
+): string[] {
+  const citedSourceIds = new Set<string>();
+  for (const message of conversation.messages) {
+    for (const citation of message.citations ?? []) {
+      citedSourceIds.add(citation.sourceId);
+    }
+  }
+  return [...citedSourceIds].filter((id) => !currentSourceIds.has(id));
+}
+
+async function serializePrompt(
+  projectDir: string,
   conversation: AiConversation,
   request: AiChatRequest,
-): string {
+): Promise<string> {
+  const manifest = await listAiSources(projectDir);
+  const currentSourceIds = new Set(manifest.sources.map((source) => source.id));
+  const staleSourceIds = findStaleCitedSourceIds(conversation, currentSourceIds);
+
   const lines = [
     "You are the OpenLatex AI assistant for scientific writing.",
     "Follow these rules:",
@@ -46,6 +74,10 @@ function serializePrompt(
     "- When you make a claim from a source, first search the KB, then verify the exact quote on the page with cite().",
     "- Prefer concise answers with explicit citations and page numbers.",
     "- If a quote cannot be verified, say so and keep searching instead of guessing.",
+    "- A citation you made earlier in THIS conversation is not automatically still valid. Sources can be deleted mid-conversation. Before restating, confirming, repeating, or relying on any earlier citation — even one you already verified — you MUST call cite() again in this turn. Never describe something as \"verified\" unless cite() succeeded in this exact turn.",
+    staleSourceIds.length > 0
+      ? `- The following source IDs were cited earlier in this conversation but have since been permanently REMOVED from the knowledge base: ${staleSourceIds.join(", ")}. Do not restate, confirm, or rely on anything from them. If asked, say the source was removed from the knowledge base and that information can no longer be verified.`
+      : null,
     `Intent: ${request.intent ?? conversation.intent}`,
     `Conversation title: ${conversation.title}`,
     request.sourceIds && request.sourceIds.length > 0
@@ -54,7 +86,7 @@ function serializePrompt(
     "",
     "User request:",
     request.message,
-  ];
+  ].filter((line): line is string => line !== null);
 
   return lines.join("\n");
 }
@@ -282,7 +314,7 @@ export async function* runOpenLatexChatTurn(
   request: AiChatRequest,
   isNewSession: boolean,
 ) {
-  const prompt = serializePrompt(conversation, request);
+  const prompt = await serializePrompt(projectDir, conversation, request);
   const sessionId = conversation.sdkSessionId ?? conversation.id;
 
   // `sessionId` creates a session under a caller-chosen id and is only valid
