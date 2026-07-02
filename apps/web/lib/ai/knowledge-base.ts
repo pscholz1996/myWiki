@@ -681,6 +681,7 @@ export async function searchAiKnowledgeBase(
   projectDir: string,
   query: string,
   topK = 5,
+  sourceIds?: string[],
 ): Promise<AiSearchHit[]> {
   const manifest = await readManifest(projectDir);
   if (!manifest.embeddingDimensions || manifest.index.chunkCount === 0) {
@@ -699,6 +700,14 @@ export async function searchAiKnowledgeBase(
     return [];
   }
 
+  // An empty/undefined allowlist means "search everything" — a non-empty
+  // one restricts scoring to those sources' chunks only, so a conversation
+  // scoped to specific sources can't retrieve (and therefore can't cite)
+  // anything outside that scope. Previously this was advisory-only: the
+  // system prompt told the model which sources were "selected", but
+  // search_knowledge_base searched the whole corpus regardless.
+  const allowedSourceIds = sourceIds && sourceIds.length > 0 ? new Set(sourceIds) : null;
+
   const dimensions = manifest.embeddingDimensions;
   const queryVector = (await embedTexts([query]))[0];
   if (!queryVector) return [];
@@ -707,12 +716,15 @@ export async function searchAiKnowledgeBase(
   const scored: AiSearchHit[] = [];
 
   for (let index = 0; index < chunkRecords.length; index += 1) {
+    const chunk = chunkRecords[index];
+    if (allowedSourceIds && !allowedSourceIds.has(chunk.sourceId)) continue;
+
     const start = index * dimensions;
     const end = start + dimensions;
     const chunkEmbedding = embeddingMatrix.slice(start, end);
     scored.push({
       score: cosineSimilarity(queryEmbedding, chunkEmbedding),
-      chunk: chunkRecords[index],
+      chunk,
     });
   }
 

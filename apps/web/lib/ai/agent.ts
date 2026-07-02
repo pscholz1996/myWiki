@@ -146,7 +146,10 @@ async function editProjectTextFile(
   });
 }
 
-export function createOpenLatexMcpServer(projectDir: string) {
+export function createOpenLatexMcpServer(
+  projectDir: string,
+  scopedSourceIds?: string[],
+) {
   return createSdkMcpServer({
     name: "openlatex",
     version: "0.1.0",
@@ -160,10 +163,14 @@ export function createOpenLatexMcpServer(projectDir: string) {
           topK: z.number().int().min(1).max(10).optional(),
         },
         async (args) => {
+          // scopedSourceIds is ambient (set by the conversation's selected
+          // sources, not by the model) — a hard restriction the model
+          // cannot widen by omitting it from the call.
           const hits = await searchAiKnowledgeBase(
             projectDir,
             args.query,
             args.topK ?? 5,
+            scopedSourceIds,
           );
           return normalizeToolResult({ hits });
         },
@@ -336,7 +343,7 @@ export async function* runOpenLatexChatTurn(
       allowDangerouslySkipPermissions: true,
       tools: [],
       mcpServers: {
-        openlatex: createOpenLatexMcpServer(projectDir),
+        openlatex: createOpenLatexMcpServer(projectDir, conversation.sourceIds),
       },
       includePartialMessages: true,
       maxTurns: 8,
