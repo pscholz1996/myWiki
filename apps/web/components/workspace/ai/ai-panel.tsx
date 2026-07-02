@@ -24,6 +24,7 @@ import {
   SparklesIcon,
   Trash2Icon,
 } from "lucide-react";
+import type { AiConversation } from "@/lib/ai/types";
 import { toast } from "sonner";
 
 export function AiPanel() {
@@ -37,6 +38,7 @@ export function AiPanel() {
   const activeConversationId = useAiStore(
     (state) => state.activeConversationId,
   );
+  const currentIntent = useAiStore((state) => state.currentIntent);
   const loading = useAiStore((state) => state.loading);
   const error = useAiStore((state) => state.error);
   const actionLoading = useAiStore((state) => state.actionLoading);
@@ -48,6 +50,7 @@ export function AiPanel() {
   const createConversation = useAiStore((state) => state.createConversation);
   const selectConversation = useAiStore((state) => state.selectConversation);
   const sendMessage = useAiStore((state) => state.sendMessage);
+  const setIntent = useAiStore((state) => state.setIntent);
 
   const sourceNameById = new Map(
     sources.map((source) => [source.id, source.originalName]),
@@ -133,7 +136,12 @@ export function AiPanel() {
           <div className="font-medium text-muted-foreground text-xs">
             Intent
           </div>
-          <Select defaultValue="research">
+          <Select
+            value={currentIntent}
+            onValueChange={(value) =>
+              setIntent(value as AiConversation["intent"])
+            }
+          >
             <SelectTrigger className="w-full">
               <SelectValue placeholder="Select intent" />
             </SelectTrigger>

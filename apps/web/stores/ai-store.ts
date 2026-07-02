@@ -37,6 +37,7 @@ interface AiState {
   selectConversation: (conversationId: string) => Promise<void>;
   removeConversation: (conversationId: string) => Promise<void>;
   sendMessage: (message: string) => Promise<void>;
+  setIntent: (intent: AiConversation["intent"]) => void;
 }
 
 function nowIso(): string {
@@ -397,5 +398,14 @@ export const useAiStore = create<AiState>((set, get) => ({
     } finally {
       set({ chatLoading: false });
     }
+  },
+
+  setIntent(intent: AiConversation["intent"]) {
+    set((state) => ({
+      currentIntent: intent,
+      activeConversation: state.activeConversation
+        ? { ...state.activeConversation, intent }
+        : state.activeConversation,
+    }));
   },
 }));
