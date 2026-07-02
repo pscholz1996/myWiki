@@ -1,33 +1,9 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { pipeline } from "@huggingface/transformers";
+import type { AiManifest, AiSourceKind, AiSourceRecord } from "@/lib/ai/types";
 
-export type AiSourceKind = "pdf" | "markdown" | "text";
-
-export interface AiSourceRecord {
-  id: string;
-  originalName: string;
-  storedName: string;
-  relativePath: string;
-  kind: AiSourceKind;
-  bytes: number;
-  pageCount?: number;
-  ingestedAt: string;
-  updatedAt: string;
-}
-
-export interface AiManifest {
-  version: 1;
-  updatedAt: string;
-  embeddingModel: string;
-  embeddingDimensions: number | null;
-  sources: AiSourceRecord[];
-  index: {
-    chunkCount: number;
-    embeddingCount: number;
-    generatedAt: string | null;
-  };
-}
+export type { AiManifest, AiSourceKind, AiSourceRecord };
 
 export interface AiChunkRecord {
   id: string;
@@ -81,7 +57,7 @@ function posixJoin(...parts: string[]): string {
   return path.posix.join(...parts).replace(/\\/g, "/");
 }
 
-function normalizeWhitespace(value: string): string {
+export function normalizeWhitespace(value: string): string {
   return value.replace(/\s+/g, " ").trim();
 }
 
@@ -737,6 +713,23 @@ export async function getAiSourceRecord(
 ): Promise<AiSourceRecord | null> {
   const manifest = await readManifest(projectDir);
   return manifest.sources.find((source) => source.id === sourceId) ?? null;
+}
+
+export async function setAiSourceBibKey(
+  projectDir: string,
+  sourceId: string,
+  bibKey: string,
+): Promise<AiSourceRecord> {
+  const manifest = await readManifest(projectDir);
+  const source = manifest.sources.find((entry) => entry.id === sourceId);
+  if (!source) {
+    throw new Error("Source not found");
+  }
+
+  source.bibKey = bibKey;
+  source.updatedAt = nowIso();
+  await writeManifest(projectDir, { ...manifest, updatedAt: nowIso() });
+  return source;
 }
 
 export function getAiSourceFilePath(

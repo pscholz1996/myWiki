@@ -83,6 +83,13 @@ export interface AiSourceRecord {
   pageCount?: number;
   ingestedAt: string;
   updatedAt: string;
+  /**
+   * BibTeX cite key this source is linked to in the project's .bib file,
+   * once ensure_bibtex_entry has created or found one. Keeps repeated
+   * citation requests for the same source idempotent instead of appending
+   * a duplicate .bib entry every time.
+   */
+  bibKey?: string;
 }
 
 export interface AiManifest {

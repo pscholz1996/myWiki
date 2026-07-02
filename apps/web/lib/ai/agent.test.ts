@@ -1,5 +1,10 @@
 import { describe, expect, test } from "vitest";
-import { applyExactReplace, findStaleCitedSourceIds } from "./agent";
+import {
+  applyExactReplace,
+  bibtexHasKey,
+  findStaleCitedSourceIds,
+  formatBibtexEntry,
+} from "./agent";
 import type { AiConversation, AiMessage } from "./types";
 
 function conversation(messages: AiMessage[]): AiConversation {
@@ -90,5 +95,40 @@ describe("applyExactReplace — the targeted-edit matching gate", () => {
     // is exactly the bug applyExactReplace's function-form replace avoids.
     const result = applyExactReplace("Let x be a value.", "a value", "$x^2$");
     expect(result).toEqual({ content: "Let x be $x^2$." });
+  });
+});
+
+describe("formatBibtexEntry — the .bib entry writer", () => {
+  test("formats fields in insertion order, dropping empty ones", () => {
+    const entry = formatBibtexEntry("article", "brown2025mbse", {
+      author: "Brown, J.",
+      title: "A Survey of MBSE",
+      year: "2025",
+      note: "",
+    });
+    expect(entry).toBe(
+      "@article{brown2025mbse,\n" +
+        "  author = {Brown, J.},\n" +
+        "  title = {A Survey of MBSE},\n" +
+        "  year = {2025},\n" +
+        "}\n",
+    );
+  });
+});
+
+describe("bibtexHasKey — the duplicate-key guard", () => {
+  test("finds an existing key regardless of entry type or spacing", () => {
+    const bib = "@inproceedings{smith2020,\n  title = {X},\n}\n";
+    expect(bibtexHasKey(bib, "smith2020")).toBe(true);
+  });
+
+  test("does not false-match a key that is only a prefix of another", () => {
+    const bib = "@article{smith2020b,\n  title = {X},\n}\n";
+    expect(bibtexHasKey(bib, "smith2020")).toBe(false);
+  });
+
+  test("returns false for an empty or unrelated file", () => {
+    expect(bibtexHasKey("", "smith2020")).toBe(false);
+    expect(bibtexHasKey("@article{jones2019,\n}\n", "smith2020")).toBe(false);
   });
 });

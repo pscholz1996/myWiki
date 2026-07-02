@@ -9,10 +9,13 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import {
   deleteAiSource,
+  getAiSourceRecord,
   listAiSources,
+  normalizeWhitespace,
   readAiSourceFull,
   readAiSourcePage,
   searchAiKnowledgeBase,
+  setAiSourceBibKey,
   verifyAiCitation,
 } from "@/lib/ai/knowledge-base";
 import { listProjectTree, type FsNode } from "@/lib/fs/list";
@@ -93,6 +96,7 @@ async function serializePrompt(
     "- Prefer concise answers with explicit citations and page numbers.",
     "- If a quote cannot be verified, say so and keep searching instead of guessing.",
     "- A citation you made earlier in THIS conversation is not automatically still valid. Sources can be deleted mid-conversation. Before restating, confirming, repeating, or relying on any earlier citation — even one you already verified — you MUST call cite() again in this turn. Never describe something as \"verified\" unless cite() succeeded in this exact turn.",
+    "- When you're adding a source-backed sentence into the .tex text itself (not just discussing it in chat), a chat citation chip isn't enough: after cite() succeeds, call ensure_bibtex_entry to get a real cite key, then insert \\cite{key} at that spot with replace_in_project_file.",
     staleSourceIds.length > 0
       ? `- The following source IDs were cited earlier in this conversation but have since been permanently REMOVED from the knowledge base: ${staleSourceIds.join(", ")}. Do not restate, confirm, or rely on anything from them. If asked, say the source was removed from the knowledge base and that information can no longer be verified.`
       : null,
@@ -253,6 +257,165 @@ async function replaceInProjectTextFile(
   });
 }
 
+export const BIBTEX_ENTRY_TYPES = [
+  "article",
+  "inproceedings",
+  "incollection",
+  "inbook",
+  "book",
+  "proceedings",
+  "techreport",
+  "phdthesis",
+  "mastersthesis",
+  "online",
+  "misc",
+] as const;
+
+const BIBTEX_KEY_PATTERN = /^[A-Za-z][A-Za-z0-9:_-]*$/;
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+export function formatBibtexEntry(
+  entryType: string,
+  key: string,
+  fields: Record<string, string>,
+): string {
+  const fieldLines = Object.entries(fields)
+    .filter(([, value]) => value.trim().length > 0)
+    .map(([name, value]) => `  ${name} = {${value.trim()}},`)
+    .join("\n");
+  return `@${entryType}{${key},\n${fieldLines}\n}\n`;
+}
+
+// Matches "@type{key," (case-insensitive, tolerant of whitespace) so a
+// duplicate-key check doesn't miss an existing entry, or false-positive on
+// a key that's merely a prefix of another (e.g. "smith2020" vs
+// "smith2020b").
+export function bibtexHasKey(bibContent: string, key: string): boolean {
+  const pattern = new RegExp(`@[A-Za-z]+\\s*\\{\\s*${escapeRegExp(key)}\\s*,`, "i");
+  return pattern.test(bibContent);
+}
+
+// Ties a knowledge-base source to a BibTeX entry so \cite{key} in the .tex
+// text points at a real, findable reference instead of the citation living
+// only as an informal "source · page" chip in the chat panel. Idempotent
+// per source (see AiSourceRecord.bibKey) so re-citing the same paper across
+// a conversation doesn't append duplicate .bib entries.
+async function ensureBibtexEntry(
+  projectDir: string,
+  args: {
+    sourceId: string;
+    bibFile?: string;
+    entryType: string;
+    key: string;
+    fields: Record<string, string>;
+  },
+): Promise<CallToolResult> {
+  if (!BIBTEX_KEY_PATTERN.test(args.key)) {
+    return callResult(
+      {
+        error:
+          "key must start with a letter and contain only letters, digits, ':', '_' or '-' (standard BibTeX cite-key syntax).",
+      },
+      true,
+    );
+  }
+
+  const source = await getAiSourceRecord(projectDir, args.sourceId);
+  if (!source) {
+    return callResult({ error: "Source not found" }, true);
+  }
+
+  if (source.bibKey) {
+    return normalizeToolResult({ key: source.bibKey, reused: true });
+  }
+
+  const tree = await listProjectTree(projectDir);
+  const bibFiles = flattenProjectTree(tree).filter((p) =>
+    p.toLowerCase().endsWith(".bib"),
+  );
+
+  let targetBibFile = args.bibFile;
+  if (!targetBibFile) {
+    if (bibFiles.length === 1) {
+      targetBibFile = bibFiles[0];
+    } else if (bibFiles.length === 0) {
+      return callResult(
+        {
+          error:
+            'No .bib file found in the project. Pass bib_file with a path to create one (e.g. "references.bib").',
+        },
+        true,
+      );
+    } else {
+      return callResult(
+        {
+          error: `Multiple .bib files found in the project — pass bib_file to pick one: ${bibFiles.join(", ")}`,
+        },
+        true,
+      );
+    }
+  }
+
+  const absBibPath = resolveInProject(projectDir, targetBibFile);
+  if (path.extname(absBibPath).toLowerCase() !== ".bib") {
+    return callResult({ error: "bib_file must be a .bib file" }, true);
+  }
+
+  let existingContent = "";
+  try {
+    existingContent = await fs.readFile(absBibPath, "utf8");
+  } catch {
+    // File doesn't exist yet — it will be created below.
+  }
+
+  if (bibtexHasKey(existingContent, args.key)) {
+    return callResult(
+      {
+        error: `Key "${args.key}" already exists in ${targetBibFile}. Pick a different, more specific key.`,
+      },
+      true,
+    );
+  }
+
+  // Best-effort sanity check, not a hard verification gate like cite() —
+  // BibTeX metadata (author lists, exact year) can't be checked with the
+  // same certainty as an exact quote. Still worth flagging when the title
+  // doesn't even loosely match the source's own first page.
+  let titleVerified: boolean | null = null;
+  if (args.fields.title) {
+    try {
+      const { text } = await readAiSourcePage(projectDir, args.sourceId, 1);
+      titleVerified = normalizeWhitespace(text)
+        .toLowerCase()
+        .includes(normalizeWhitespace(args.fields.title).toLowerCase());
+    } catch {
+      titleVerified = null;
+    }
+  }
+
+  const entry = formatBibtexEntry(args.entryType, args.key, args.fields);
+  const nextContent =
+    existingContent.trim().length > 0
+      ? `${existingContent.trimEnd()}\n\n${entry}`
+      : entry;
+
+  await fs.mkdir(path.dirname(absBibPath), { recursive: true });
+  echo.recordWrite(absBibPath);
+  await fs.writeFile(absBibPath, nextContent, "utf8");
+
+  await setAiSourceBibKey(projectDir, args.sourceId, args.key);
+
+  return normalizeToolResult({
+    key: args.key,
+    bibFile: targetBibFile,
+    reused: false,
+    titleVerified,
+  });
+}
+
 export function createOpenLatexMcpServer(
   projectDir: string,
   scopedSourceIds?: string[],
@@ -347,6 +510,48 @@ export function createOpenLatexMcpServer(
               error instanceof Error
                 ? error.message
                 : "Citation verification failed",
+              true,
+            );
+          }
+        },
+      ),
+      tool(
+        "ensure_bibtex_entry",
+        "Find or create a BibTeX entry in the project's .bib file for a knowledge-base source, and link them so repeated calls for the same source are idempotent. Returns the cite key — insert \\cite{key} into the .tex text yourself with replace_in_project_file. Only pass fields you can actually support from the source's own text (e.g. its title page); this is bibliographic bookkeeping, not a place to invent author/year details.",
+        {
+          source_id: z.string(),
+          bib_file: z
+            .string()
+            .optional()
+            .describe(
+              "Path to the .bib file to use, e.g. \"references.bib\". Required when the project has more than one .bib file; optional otherwise.",
+            ),
+          entry_type: z.enum(BIBTEX_ENTRY_TYPES),
+          key: z
+            .string()
+            .describe(
+              "BibTeX cite key, e.g. \"brown2025mbse\" — letters/digits/':'/'_'/'-' only.",
+            ),
+          fields: z
+            .record(z.string(), z.string())
+            .describe(
+              "BibTeX fields, e.g. { author, title, year, journal } or { author, title, year, booktitle } depending on entry_type.",
+            ),
+        },
+        async (args) => {
+          try {
+            return await ensureBibtexEntry(projectDir, {
+              sourceId: args.source_id,
+              bibFile: args.bib_file,
+              entryType: args.entry_type,
+              key: args.key,
+              fields: args.fields,
+            });
+          } catch (error) {
+            return callResult(
+              error instanceof Error
+                ? error.message
+                : "Failed to create BibTeX entry",
               true,
             );
           }
