@@ -15,7 +15,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { useAiStore } from "@/stores/ai-store";
 import {
   BadgeInfoIcon,
-  BookOpenIcon,
   FileTextIcon,
   FolderPlusIcon,
   Loader2Icon,
@@ -24,6 +23,7 @@ import {
   SearchIcon,
   SparklesIcon,
   Trash2Icon,
+  ShieldCheckIcon,
 } from "lucide-react";
 import { SiClaude } from "@icons-pack/react-simple-icons";
 import { DEFAULT_CONTEXT_WINDOW_TOKENS, type AiConversation } from "@/lib/ai/types";
@@ -413,10 +413,10 @@ export function AiPanel() {
                         href={`/api/ai/sources/${citation.sourceId}/file#page=${citation.page}`}
                         target="_blank"
                         rel="noreferrer"
-                        title={citation.quote}
-                        className="inline-flex items-center gap-1 rounded-full border bg-background/80 px-2 py-0.5 text-[11px] text-foreground/80 hover:bg-background"
+                        title={`Verified quote: "${citation.quote}"`}
+                        className="inline-flex items-center gap-1 rounded-full border border-green-600/30 bg-green-600/5 px-2 py-0.5 text-[11px] text-foreground/80 hover:bg-green-600/10 dark:border-green-400/30 dark:bg-green-400/5"
                       >
-                        <BookOpenIcon className="size-3" />
+                        <ShieldCheckIcon className="size-3 text-green-600 dark:text-green-400" />
                         {sourceNameById.get(citation.sourceId) ??
                           "Unknown source"}
                         {" · p."}
