@@ -340,7 +340,7 @@ export async function* runOpenLatexChatTurn(
       },
       includePartialMessages: true,
       maxTurns: 8,
-      model: request.model ?? conversation.model ?? "sonnet",
+      model: request.model ?? conversation.model ?? "claude-sonnet-5",
     },
   });
 
