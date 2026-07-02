@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { GithubIcon, RocketIcon, ExternalLinkIcon, LogOutIcon } from "lucide-react";
+import { RocketIcon, ExternalLinkIcon, LogOutIcon } from "lucide-react";
+import { SiGithub } from "@icons-pack/react-simple-icons";
 import { toast } from "sonner";
 import {
   DropdownMenu,
@@ -67,7 +68,7 @@ export function GithubAccountMenu() {
                 className="size-4 rounded-full"
               />
             ) : (
-              <GithubIcon className="size-3.5" />
+              <SiGithub className="size-3.5" color="currentColor" />
             )}
           </Button>
         </DropdownMenuTrigger>
@@ -90,7 +91,7 @@ export function GithubAccountMenu() {
             </>
           ) : !authenticated ? (
             <DropdownMenuItem onSelect={() => setLoginOpen(true)}>
-              <GithubIcon className="mr-2 size-4" />
+              <SiGithub className="mr-2 size-4" color="currentColor" />
               Sign in with GitHub
             </DropdownMenuItem>
           ) : (

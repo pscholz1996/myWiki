@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
-import { FolderOpenIcon, FolderIcon, GithubIcon } from "lucide-react";
+import { FolderOpenIcon, FolderIcon } from "lucide-react";
+import { SiGithub } from "@icons-pack/react-simple-icons";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { DirectoryBrowserModal } from "./directory-browser-modal";
@@ -128,7 +129,7 @@ export function WelcomeScreen({ recent }: WelcomeScreenProps) {
           rel="noopener noreferrer"
           className="flex items-center gap-1 transition-colors hover:text-foreground"
         >
-          <GithubIcon className="size-3.5" />
+          <SiGithub className="size-3.5" color="currentColor" />
           GitHub
         </a>
       </footer>

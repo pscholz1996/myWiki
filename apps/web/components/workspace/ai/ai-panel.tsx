@@ -25,6 +25,7 @@ import {
   SparklesIcon,
   Trash2Icon,
 } from "lucide-react";
+import { SiClaude } from "@icons-pack/react-simple-icons";
 import { DEFAULT_CONTEXT_WINDOW_TOKENS, type AiConversation } from "@/lib/ai/types";
 import { toast } from "sonner";
 import { AiMarkdown } from "./markdown";
@@ -166,6 +167,10 @@ export function AiPanel() {
           <div className="font-medium text-sm">AI Workspace</div>
           <div className="text-muted-foreground text-xs">
             Research, write, and verify against your sources.
+          </div>
+          <div className="mt-1 flex items-center gap-1 text-[10px] text-muted-foreground/70">
+            <SiClaude className="size-2.5" />
+            Powered by Claude
           </div>
         </div>
         <div className="flex flex-col items-end gap-0.5 text-muted-foreground text-xs">

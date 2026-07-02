@@ -8,10 +8,10 @@ import {
   MonitorIcon,
   ListIcon,
   HashIcon,
-  GithubIcon,
   GitBranchIcon,
   ChevronDownIcon,
 } from "lucide-react";
+import { SiGithub } from "@icons-pack/react-simple-icons";
 import { useTheme } from "next-themes";
 import {
   Panel,
@@ -283,7 +283,7 @@ export function Sidebar() {
               rel="noopener noreferrer"
               title="GitHub"
             >
-              <GithubIcon className="size-3.5" />
+              <SiGithub className="size-3.5" color="currentColor" />
             </a>
           </Button>
           {mounted && (
