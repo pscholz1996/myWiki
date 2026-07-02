@@ -51,6 +51,7 @@ export function AiPanel() {
   const removeSource = useAiStore((state) => state.removeSource);
   const createConversation = useAiStore((state) => state.createConversation);
   const selectConversation = useAiStore((state) => state.selectConversation);
+  const removeConversation = useAiStore((state) => state.removeConversation);
   const sendMessage = useAiStore((state) => state.sendMessage);
   const setIntent = useAiStore((state) => state.setIntent);
   const toggleSourceSelection = useAiStore((state) => state.toggleSourceSelection);
@@ -95,6 +96,20 @@ export function AiPanel() {
   const handleNewConversation = async () => {
     await createConversation();
     setDraft("");
+  };
+
+  const handleDeleteConversation = async () => {
+    if (!activeConversationId) return;
+    const title = activeConversation?.title ?? "this conversation";
+    const confirmed = window.confirm(`Delete "${title}"?`);
+    if (!confirmed) return;
+
+    try {
+      await removeConversation(activeConversationId);
+      toast.success(`Deleted "${title}"`);
+    } catch {
+      // Store already captures the error.
+    }
   };
 
   const handleSend = async () => {
@@ -243,6 +258,17 @@ export function AiPanel() {
               onClick={() => void handleNewConversation()}
             >
               <MessageSquarePlusIcon className="size-4" />
+            </Button>
+
+            <Button
+              size="icon"
+              variant="ghost"
+              className="text-muted-foreground"
+              onClick={() => void handleDeleteConversation()}
+              disabled={!activeConversationId || actionLoading}
+              aria-label="Delete conversation"
+            >
+              <Trash2Icon className="size-4" />
             </Button>
           </div>
         </div>
