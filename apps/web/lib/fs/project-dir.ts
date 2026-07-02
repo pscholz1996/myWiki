@@ -62,9 +62,10 @@ export const ALLOWED_EXTS = new Set([
   ".bib",
   ".cls",
   ".sty",
+  ".txt",
   ".png",
   ".jpg",
   ".jpeg",
   ".pdf",
 ]);
-export const TEXT_EXTS = new Set([".tex", ".bib", ".cls", ".sty"]);
+export const TEXT_EXTS = new Set([".tex", ".bib", ".cls", ".sty", ".txt"]);
