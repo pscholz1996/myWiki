@@ -111,6 +111,19 @@ function mergeConversationSummary(
   return copy.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
 }
 
+// Guards loadSources/uploadSources/removeSource against overwriting each
+// other with stale data. All three fetch-then-set the same manifest/sources
+// pair, so whichever *response* lands last normally wins — but responses
+// don't always arrive in the order their requests were sent. In practice:
+// the mount-time loadSources() (fired twice under React Strict Mode) can
+// still be in flight when a fast upload finishes; if that old GET resolves
+// after the upload's response, it silently reverts the UI to the
+// pre-upload (empty) state even though the backend — and the rest of the
+// app — has the new source. Each call captures the sequence number at
+// start and only commits if no newer call has started since, so a late
+// response from a superseded request is discarded instead of applied.
+let sourcesOpSeq = 0;
+
 export const useAiStore = create<AiState>((set, get) => ({
   manifest: null,
   sources: [],
@@ -124,17 +137,20 @@ export const useAiStore = create<AiState>((set, get) => ({
   chatLoading: false,
 
   async loadSources() {
+    const token = ++sourcesOpSeq;
     set({ loading: true, error: null });
     try {
       const manifest = await fetchAiManifest();
+      if (token !== sourcesOpSeq) return;
       set({ manifest, sources: manifest.sources });
     } catch (error) {
+      if (token !== sourcesOpSeq) return;
       set({
         error:
           error instanceof Error ? error.message : "Failed to load knowledge base",
       });
     } finally {
-      set({ loading: false });
+      if (token === sourcesOpSeq) set({ loading: false });
     }
   },
 
@@ -154,34 +170,40 @@ export const useAiStore = create<AiState>((set, get) => ({
   },
 
   async uploadSources(files: File[]) {
+    const token = ++sourcesOpSeq;
     set({ actionLoading: true, error: null });
     try {
       const manifest = await uploadAiSources(files);
+      if (token !== sourcesOpSeq) return;
       set({ manifest, sources: manifest.sources });
     } catch (error) {
+      if (token !== sourcesOpSeq) return;
       set({
         error:
           error instanceof Error ? error.message : "Failed to upload sources",
       });
       throw error;
     } finally {
-      set({ actionLoading: false });
+      if (token === sourcesOpSeq) set({ actionLoading: false });
     }
   },
 
   async removeSource(sourceId: string) {
+    const token = ++sourcesOpSeq;
     set({ actionLoading: true, error: null });
     try {
       const manifest = await deleteAiSource(sourceId);
+      if (token !== sourcesOpSeq) return;
       set({ manifest, sources: manifest.sources });
     } catch (error) {
+      if (token !== sourcesOpSeq) return;
       set({
         error:
           error instanceof Error ? error.message : "Failed to delete source",
       });
       throw error;
     } finally {
-      set({ actionLoading: false });
+      if (token === sourcesOpSeq) set({ actionLoading: false });
     }
   },
 
