@@ -26,6 +26,7 @@ interface AiState {
   activeConversationId: string | null;
   activeConversation: AiConversation | null;
   currentIntent: AiConversation["intent"];
+  currentSourceIds: string[];
   loading: boolean;
   error: string | null;
   actionLoading: boolean;
@@ -39,6 +40,7 @@ interface AiState {
   removeConversation: (conversationId: string) => Promise<void>;
   sendMessage: (message: string) => Promise<void>;
   setIntent: (intent: AiConversation["intent"]) => void;
+  toggleSourceSelection: (sourceId: string) => void;
 }
 
 function nowIso(): string {
@@ -132,6 +134,7 @@ export const useAiStore = create<AiState>((set, get) => ({
   activeConversationId: null,
   activeConversation: null,
   currentIntent: "research",
+  currentSourceIds: [],
   loading: false,
   error: null,
   actionLoading: false,
@@ -196,7 +199,22 @@ export const useAiStore = create<AiState>((set, get) => ({
     try {
       const manifest = await deleteAiSource(sourceId);
       if (token !== sourcesOpSeq) return;
-      set({ manifest, sources: manifest.sources });
+      set((state) => ({
+        manifest,
+        sources: manifest.sources,
+        // Drop the deleted source from any active selection so the "N
+        // selected" count and the search scope don't silently reference a
+        // source that no longer exists.
+        currentSourceIds: state.currentSourceIds.filter((id) => id !== sourceId),
+        activeConversation: state.activeConversation
+          ? {
+              ...state.activeConversation,
+              sourceIds: state.activeConversation.sourceIds.filter(
+                (id) => id !== sourceId,
+              ),
+            }
+          : state.activeConversation,
+      }));
     } catch (error) {
       if (token !== sourcesOpSeq) return;
       set({
@@ -218,7 +236,7 @@ export const useAiStore = create<AiState>((set, get) => ({
       model: "claude-sonnet-5",
       sdkSessionId: conversationId,
       messages: [],
-      sourceIds: [],
+      sourceIds: get().currentSourceIds,
       updatedAt: nowIso(),
     };
 
@@ -246,6 +264,7 @@ export const useAiStore = create<AiState>((set, get) => ({
         activeConversationId: conversation.id,
         activeConversation: conversation,
         currentIntent: conversation.intent,
+        currentSourceIds: conversation.sourceIds,
       });
     } catch (error) {
       set({
@@ -306,7 +325,7 @@ export const useAiStore = create<AiState>((set, get) => ({
           model: "claude-sonnet-5",
           sdkSessionId: conversationId,
           messages: [],
-          sourceIds: [],
+          sourceIds: get().currentSourceIds,
           updatedAt: nowIso(),
         };
       }
@@ -431,5 +450,21 @@ export const useAiStore = create<AiState>((set, get) => ({
         ? { ...state.activeConversation, intent }
         : state.activeConversation,
     }));
+  },
+
+  toggleSourceSelection(sourceId: string) {
+    set((state) => {
+      const base = state.activeConversation?.sourceIds ?? state.currentSourceIds;
+      const nextSourceIds = base.includes(sourceId)
+        ? base.filter((id) => id !== sourceId)
+        : [...base, sourceId];
+
+      return {
+        currentSourceIds: nextSourceIds,
+        activeConversation: state.activeConversation
+          ? { ...state.activeConversation, sourceIds: nextSourceIds }
+          : state.activeConversation,
+      };
+    });
   },
 }));

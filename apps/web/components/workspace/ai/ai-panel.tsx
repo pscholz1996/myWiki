@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -39,6 +40,7 @@ export function AiPanel() {
     (state) => state.activeConversationId,
   );
   const currentIntent = useAiStore((state) => state.currentIntent);
+  const currentSourceIds = useAiStore((state) => state.currentSourceIds);
   const loading = useAiStore((state) => state.loading);
   const error = useAiStore((state) => state.error);
   const actionLoading = useAiStore((state) => state.actionLoading);
@@ -51,6 +53,9 @@ export function AiPanel() {
   const selectConversation = useAiStore((state) => state.selectConversation);
   const sendMessage = useAiStore((state) => state.sendMessage);
   const setIntent = useAiStore((state) => state.setIntent);
+  const toggleSourceSelection = useAiStore((state) => state.toggleSourceSelection);
+
+  const selectedSourceIds = activeConversation?.sourceIds ?? currentSourceIds;
 
   const sourceNameById = new Map(
     sources.map((source) => [source.id, source.originalName]),
@@ -253,6 +258,14 @@ export function AiPanel() {
             </Button>
           </div>
 
+          {sources.length > 0 ? (
+            <div className="text-muted-foreground text-xs">
+              {selectedSourceIds.length === 0
+                ? "No sources checked — chat searches the whole knowledge base."
+                : `Chat is scoped to ${selectedSourceIds.length} checked source${selectedSourceIds.length === 1 ? "" : "s"}.`}
+            </div>
+          ) : null}
+
           <div className="max-h-52 space-y-2 overflow-y-auto pr-1">
             {sources.length === 0 ? (
               <div className="rounded-md border border-dashed px-3 py-4 text-center text-muted-foreground text-xs">
@@ -264,19 +277,27 @@ export function AiPanel() {
                   key={source.id}
                   className="flex items-start justify-between gap-3 rounded-md border bg-background px-3 py-2"
                 >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <FileTextIcon className="size-3.5 text-muted-foreground" />
-                      <div className="truncate font-medium text-sm">
-                        {source.originalName}
+                  <div className="flex min-w-0 flex-1 items-start gap-2">
+                    <Checkbox
+                      className="mt-0.5"
+                      checked={selectedSourceIds.includes(source.id)}
+                      onCheckedChange={() => toggleSourceSelection(source.id)}
+                      aria-label={`Scope chat to ${source.originalName}`}
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <FileTextIcon className="size-3.5 text-muted-foreground" />
+                        <div className="truncate font-medium text-sm">
+                          {source.originalName}
+                        </div>
                       </div>
-                    </div>
-                    <div className="mt-1 text-muted-foreground text-xs">
-                      {source.kind.toUpperCase()} ·{" "}
-                      {Math.round(source.bytes / 1024)} KB
-                      {typeof source.pageCount === "number"
-                        ? ` · ${source.pageCount} pages`
-                        : ""}
+                      <div className="mt-1 text-muted-foreground text-xs">
+                        {source.kind.toUpperCase()} ·{" "}
+                        {Math.round(source.bytes / 1024)} KB
+                        {typeof source.pageCount === "number"
+                          ? ` · ${source.pageCount} pages`
+                          : ""}
+                      </div>
                     </div>
                   </div>
                   <Button
