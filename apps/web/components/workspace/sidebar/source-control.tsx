@@ -10,6 +10,8 @@ import {
   RefreshCwIcon,
   FileTextIcon,
   Loader2Icon,
+  ChevronDownIcon,
+  HistoryIcon,
 } from "lucide-react";
 import { useGitStore } from "@/stores/git-store";
 import { useEditorStore } from "@/stores/editor-store";
@@ -17,49 +19,8 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import type { GitFileStatus } from "@/lib/git/git-client";
-
-function statusLabel(status: GitFileStatus): string {
-  switch (status) {
-    case "staged":
-      return "A";
-    case "staged-modified":
-      return "M";
-    case "staged-deleted":
-      return "D";
-    case "modified":
-      return "M";
-    case "deleted":
-      return "D";
-    case "untracked":
-      return "?";
-    case "renamed":
-      return "R";
-    case "conflicted":
-      return "C";
-    default:
-      return "?";
-  }
-}
-
-function statusColor(status: GitFileStatus): string {
-  switch (status) {
-    case "staged":
-    case "staged-modified":
-    case "staged-deleted":
-    case "renamed":
-      return "text-green-500";
-    case "modified":
-      return "text-yellow-500";
-    case "deleted":
-      return "text-red-400";
-    case "untracked":
-      return "text-green-700 dark:text-green-400";
-    case "conflicted":
-      return "text-red-500";
-    default:
-      return "text-muted-foreground";
-  }
-}
+import { statusColor, statusLabel } from "@/lib/git/status-format";
+import { CommitHistoryList } from "./commit-history-list";
 
 function FileEntry({
   path,
@@ -124,6 +85,7 @@ export function SourceControl() {
   const behind = useGitStore((s) => s.behind);
 
   const [commitMsg, setCommitMsg] = useState("");
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   if (!isGitRepo) {
     return (
@@ -327,6 +289,26 @@ export function SourceControl() {
             No changes
           </div>
         )}
+
+      {/* History — collapsed by default, only fetched on first expand */}
+      <div className="mt-1 border-sidebar-border border-t">
+        <button
+          onClick={() => setHistoryOpen((open) => !open)}
+          className="flex h-7 w-full items-center gap-1.5 px-2 hover:bg-sidebar-accent/50"
+        >
+          <ChevronDownIcon
+            className={cn(
+              "size-3 text-muted-foreground transition-transform",
+              !historyOpen && "-rotate-90",
+            )}
+          />
+          <HistoryIcon className="size-3.5 text-muted-foreground" />
+          <span className="font-medium text-[10px] text-muted-foreground uppercase tracking-wider">
+            History
+          </span>
+        </button>
+        {historyOpen && <CommitHistoryList />}
+      </div>
     </div>
   );
 }
