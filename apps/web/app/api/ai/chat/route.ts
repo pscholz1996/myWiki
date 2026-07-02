@@ -59,6 +59,43 @@ function assistantTextFromMessage(message: any): string {
     .join("");
 }
 
+// SDKAssistantMessageError / SDKResultError subtypes come back as opaque
+// codes (e.g. "rate_limit", "error_max_turns") that mean nothing to a user.
+// Map the ones we can act on to plain language; unmapped codes fall through
+// to the caller's own fallback message rather than showing a raw code.
+function friendlySdkError(code: string | undefined | null): string | undefined {
+  switch (code) {
+    case "authentication_failed":
+      return "Claude authentication failed. Try signing in to Claude Code again.";
+    case "oauth_org_not_allowed":
+      return "Your Claude account isn't permitted to use this integration.";
+    case "billing_error":
+      return "There's a billing issue with your Claude account.";
+    case "rate_limit":
+      return "You've hit your Claude plan's rate limit. Wait a bit and try again.";
+    case "overloaded":
+      return "Claude's servers are overloaded right now. Try again shortly.";
+    case "invalid_request":
+      return "The request to Claude was invalid.";
+    case "model_not_found":
+      return "The selected Claude model isn't available.";
+    case "server_error":
+      return "Claude hit a server error. Try again.";
+    case "max_output_tokens":
+      return "The response hit the maximum output length before finishing.";
+    case "error_max_turns":
+      return "The assistant used too many tool calls for this turn and stopped early. Try a more specific request.";
+    case "error_max_budget_usd":
+      return "This turn exceeded its cost budget and was stopped.";
+    case "error_max_structured_output_retries":
+      return "The assistant couldn't produce a valid response after several attempts.";
+    case "error_during_execution":
+      return "An error occurred while the assistant was working.";
+    default:
+      return undefined;
+  }
+}
+
 /**
  * Track pending mcp__openlatex__cite tool calls by tool_use id, then
  * confirm them as citations only once their tool_result comes back
@@ -189,6 +226,10 @@ export async function POST(req: Request) {
         // that API call (see the AiConversation.contextTokens doc comment
         // for why this is an estimate, not the SDK's exact figure).
         let contextTokens: number | undefined;
+        // The first recognizable failure this turn hits (auth, billing,
+        // rate limit, overload, etc.) — surfaced as a friendly toast
+        // instead of leaving the user to infer it from a stalled response.
+        let turnErrorMessage: string | undefined;
         const pendingCitations = new Map<
           string,
           { sourceId: string; page: number; quote: string }
@@ -212,6 +253,10 @@ export async function POST(req: Request) {
                 assistantText += chunk;
                 push("assistant_chunk", { text: chunk });
               }
+              const assistantError = (sdkMessage as any).error;
+              if (assistantError) {
+                turnErrorMessage = friendlySdkError(assistantError) ?? turnErrorMessage;
+              }
             }
 
             if (kind === "result") {
@@ -220,6 +265,27 @@ export async function POST(req: Request) {
                 cumulativeUsage = mergeUsage(conversation.usage, usage);
                 contextTokens = (usage.cacheReadTokens ?? 0) + usage.inputTokens;
                 push("usage", { usage: cumulativeUsage, contextTokens });
+              }
+              if ((sdkMessage as any).is_error) {
+                const resultMessage = sdkMessage as any;
+                turnErrorMessage =
+                  friendlySdkError(resultMessage.subtype) ??
+                  resultMessage.errors?.[0] ??
+                  turnErrorMessage ??
+                  "The assistant turn ended with an error.";
+              }
+            }
+
+            // Proactive plan rate-limit status (five-hour/seven-day windows
+            // for claude.ai subscription users) — only worth surfacing once
+            // it actually blocks the request, not on every utilization tick.
+            if (kind === "rate_limit_event") {
+              const info = (sdkMessage as any).rate_limit_info;
+              if (info?.status === "rejected") {
+                const resetText = info.resetsAt
+                  ? ` Resets around ${new Date(info.resetsAt).toLocaleTimeString()}.`
+                  : "";
+                turnErrorMessage = `You've hit your Claude plan's rate limit.${resetText}`;
               }
             }
 
@@ -266,11 +332,19 @@ export async function POST(req: Request) {
             content: assistantMessage.content,
             citations: assistantMessage.citations,
           });
+          if (turnErrorMessage) {
+            push("error", {
+              conversationId: nextConversation.id,
+              message: turnErrorMessage,
+            });
+          }
           controller.close();
         } catch (error) {
           push("error", {
             conversationId: conversation.id,
-            message: error instanceof Error ? error.message : "Chat failed",
+            message:
+              turnErrorMessage ??
+              (error instanceof Error ? error.message : "Chat failed"),
           });
           controller.close();
         }
