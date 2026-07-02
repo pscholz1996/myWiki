@@ -11,7 +11,9 @@ export function RootProvider({ children }: { children: ReactNode }) {
   return (
     <ThemeProvider attribute="class" defaultTheme="light" enableSystem>
       {children}
-      <Toaster />
+      {/* bottom-right (Sonner's default) collides with the AI panel's
+          Send button, which docks to that same corner. */}
+      <Toaster position="top-center" />
     </ThemeProvider>
   );
 }
