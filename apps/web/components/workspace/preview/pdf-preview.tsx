@@ -5,7 +5,7 @@ import { useState } from "react";
 import {
   FileTextIcon,
   AlertCircleIcon,
-  LoaderIcon,
+  Loader2Icon,
   RefreshCwIcon,
   MinusIcon,
   PlusIcon,
@@ -39,7 +39,7 @@ const PdfViewer = dynamic(
     ssr: false,
     loading: () => (
       <div className="flex h-full items-center justify-center">
-        <LoaderIcon className="size-6 animate-spin text-muted-foreground" />
+        <Loader2Icon className="size-6 animate-spin text-muted-foreground" />
       </div>
     ),
   },
@@ -157,7 +157,7 @@ export function PdfPreview() {
         <div className="flex items-center gap-1.5">
           {isCompiling ? (
             <>
-              <LoaderIcon className="size-3.5 animate-spin text-muted-foreground" />
+              <Loader2Icon className="size-3.5 animate-spin text-muted-foreground" />
               <span className="text-muted-foreground text-xs">Compiling…</span>
             </>
           ) : pdfData ? (

@@ -4,7 +4,7 @@ import { useCallback, useMemo, useRef, useEffect, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
-import { LoaderIcon } from "lucide-react";
+import { Loader2Icon } from "lucide-react";
 import { toast } from "sonner";
 import { usePdfStore } from "@/stores/pdf-store";
 import { useEditorStore } from "@/stores/editor-store";
@@ -310,7 +310,7 @@ export function PdfViewer({
           onLoadError={handleLoadError}
           loading={
             <div className="flex items-center gap-2 text-muted-foreground">
-              <LoaderIcon className="size-4 animate-spin" />
+              <Loader2Icon className="size-4 animate-spin" />
               Loading PDF...
             </div>
           }
