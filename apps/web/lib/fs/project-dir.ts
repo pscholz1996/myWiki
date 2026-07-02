@@ -2,8 +2,6 @@ import fs from "node:fs";
 import path from "node:path";
 import { readCurrentProject } from "@/lib/project/config";
 
-let cached: string | null = null;
-
 export class NoProjectSelectedError extends Error {
   constructor() {
     super("No project selected.");
@@ -14,11 +12,19 @@ export class NoProjectSelectedError extends Error {
 /**
  * Returns the absolute, realpath-resolved path of the currently-selected
  * project. Throws NoProjectSelectedError if none is selected.
- * Ensures `.openlatex/` and `.openlatex/.gitignore` exist on first call.
+ * Ensures `.openlatex/` and `.openlatex/.gitignore` exist on every call.
+ *
+ * Deliberately uncached: this used to memoize its result in a module-level
+ * variable, invalidated by resetProjectDirCache() when the project changed.
+ * In practice that cache could go stale independently per route (reproduced
+ * live: switching projects twice left one dynamic API route — but not
+ * others — still resolving an earlier project, silently running git
+ * commands against the wrong repo). The underlying fs work here (a JSON
+ * read, a stat, a realpath) is cheap and this isn't a hot path, so the
+ * simplest fix is to not cache at all rather than chase cache-invalidation
+ * bugs across however many module instances a dev-mode bundler creates.
  */
 export function getProjectDir(): string {
-  if (cached) return cached;
-
   const current = readCurrentProject();
   if (!current) {
     throw new NoProjectSelectedError();
@@ -46,13 +52,7 @@ export function getProjectDir(): string {
     fs.writeFileSync(gitignore, "*\n", "utf8");
   }
 
-  cached = real;
   return real;
-}
-
-/** Clears the module cache. Called after the current project is changed. */
-export function resetProjectDirCache(): void {
-  cached = null;
 }
 
 export const BUILD_DIR_NAME = ".openlatex";

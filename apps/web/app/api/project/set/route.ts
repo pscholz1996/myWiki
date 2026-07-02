@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { resetProjectDirCache } from "@/lib/fs/project-dir";
 import { closeWatcher } from "@/lib/fs/watcher";
 import { readCurrentProject, setCurrentProject } from "@/lib/project/config";
 
@@ -43,7 +42,6 @@ export async function POST(req: Request) {
     );
   }
 
-  resetProjectDirCache();
   await closeWatcher();
 
   const current = readCurrentProject();
