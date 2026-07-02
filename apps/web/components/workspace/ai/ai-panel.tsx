@@ -54,6 +54,10 @@ export function AiPanel() {
   const sendMessage = useAiStore((state) => state.sendMessage);
   const setIntent = useAiStore((state) => state.setIntent);
   const toggleSourceSelection = useAiStore((state) => state.toggleSourceSelection);
+  const compactionNotice = useAiStore((state) => state.compactionNotice);
+  const dismissCompactionNotice = useAiStore(
+    (state) => state.dismissCompactionNotice,
+  );
 
   const selectedSourceIds = activeConversation?.sourceIds ?? currentSourceIds;
 
@@ -70,6 +74,19 @@ export function AiPanel() {
       toast.error(error);
     }
   }, [error]);
+
+  useEffect(() => {
+    if (!compactionNotice) return;
+    const { preTokens, postTokens } = compactionNotice;
+    const detail =
+      typeof preTokens === "number" && typeof postTokens === "number"
+        ? `${preTokens.toLocaleString()} → ${postTokens.toLocaleString()} tokens`
+        : undefined;
+    toast.info("Conversation history was compacted to stay in context", {
+      description: detail,
+    });
+    dismissCompactionNotice();
+  }, [compactionNotice, dismissCompactionNotice]);
 
   const handleUploadClick = () => {
     fileInputRef.current?.click();

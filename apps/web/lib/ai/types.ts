@@ -100,9 +100,22 @@ export interface AiChatRequest {
 }
 
 export interface AiChatStreamEvent {
-  type: "conversation" | "assistant_chunk" | "assistant_done" | "usage" | "error" | "sdk";
+  type:
+    | "conversation"
+    | "assistant_chunk"
+    | "assistant_done"
+    | "usage"
+    | "compacted"
+    | "error"
+    | "sdk";
   conversationId: string;
   data?: unknown;
   message?: string;
+}
+
+export interface AiCompactionNotice {
+  trigger?: "manual" | "auto";
+  preTokens?: number;
+  postTokens?: number;
 }
 

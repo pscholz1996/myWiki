@@ -348,6 +348,13 @@ export async function* runOpenLatexChatTurn(
       includePartialMessages: true,
       maxTurns: 8,
       model: request.model ?? conversation.model ?? "claude-sonnet-5",
+      // Long research conversations can exceed the context window. The SDK
+      // (the same engine behind Claude Code) already knows how to compact
+      // — summarize older turns and keep going — but that behavior lives
+      // behind a settings flag rather than being unconditionally on, so
+      // set it explicitly instead of relying on an ambient default we
+      // don't control from here.
+      settings: { autoCompactEnabled: true },
     },
   });
 

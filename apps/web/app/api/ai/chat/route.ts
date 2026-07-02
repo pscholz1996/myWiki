@@ -211,6 +211,21 @@ export async function POST(req: Request) {
                 push("usage", usage);
               }
             }
+
+            // The SDK compacted this conversation's history to stay within
+            // the context window (see agent.ts's autoCompactEnabled). This
+            // doesn't change anything we need to do — the SDK's own
+            // persisted session already summarized what it dropped — but
+            // the user should know it happened rather than just noticing
+            // the model "forgot" something from many turns ago.
+            if (kind === "system" && (sdkMessage as any)?.subtype === "compact_boundary") {
+              const metadata = (sdkMessage as any).compact_metadata ?? {};
+              push("compacted", {
+                trigger: metadata.trigger,
+                preTokens: metadata.pre_tokens,
+                postTokens: metadata.post_tokens,
+              });
+            }
           }
 
           const assistantMessage: AiMessage = {

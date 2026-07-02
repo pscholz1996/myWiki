@@ -2,6 +2,7 @@ import { create } from "zustand";
 import type {
   AiChatRequest,
   AiChatStreamEvent,
+  AiCompactionNotice,
   AiConversation,
   AiConversationSummary,
   AiManifest,
@@ -31,6 +32,8 @@ interface AiState {
   error: string | null;
   actionLoading: boolean;
   chatLoading: boolean;
+  compactionNotice: AiCompactionNotice | null;
+  dismissCompactionNotice: () => void;
   loadSources: () => Promise<void>;
   loadConversations: () => Promise<void>;
   uploadSources: (files: File[]) => Promise<AiRejectedSourceFile[]>;
@@ -139,6 +142,7 @@ export const useAiStore = create<AiState>((set, get) => ({
   error: null,
   actionLoading: false,
   chatLoading: false,
+  compactionNotice: null,
 
   async loadSources() {
     const token = ++sourcesOpSeq;
@@ -406,6 +410,11 @@ export const useAiStore = create<AiState>((set, get) => ({
           return;
         }
 
+        if (event.type === "compacted" && event.data && typeof event.data === "object") {
+          set({ compactionNotice: event.data as AiCompactionNotice });
+          return;
+        }
+
         if (event.type === "assistant_done" && event.data && typeof event.data === "object") {
           const data = event.data as {
             content?: string;
@@ -466,5 +475,9 @@ export const useAiStore = create<AiState>((set, get) => ({
           : state.activeConversation,
       };
     });
+  },
+
+  dismissCompactionNotice() {
+    set({ compactionNotice: null });
   },
 }));
