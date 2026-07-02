@@ -183,42 +183,41 @@ export function Sidebar() {
           </div>
         </Panel>
 
-        {/* Source Control header doubles as the resize handle */}
-        {isGitRepo && (
-          <>
-            <PanelResizeHandle className="shrink-0">
-              <button
-                onClick={() =>
-                  scCollapsed
-                    ? scPanelRef.current?.expand()
-                    : scPanelRef.current?.collapse()
-                }
-                className="flex h-9 w-full cursor-pointer items-center gap-2 border-sidebar-border border-y px-3 transition-colors hover:bg-sidebar-accent/50"
-              >
-                <ChevronDownIcon
-                  className={cn(
-                    "size-3.5 text-muted-foreground transition-transform",
-                    scCollapsed && "-rotate-90",
-                  )}
-                />
-                <GitBranchIcon className="size-4 text-muted-foreground" />
-                <span className="font-medium text-xs">Source Control</span>
-              </button>
-            </PanelResizeHandle>
+        {/* Source Control header doubles as the resize handle. Always
+            rendered — git is optional, and SourceControl itself shows an
+            "Initialize Repository" opt-in when isGitRepo is false, so this
+            section must stay reachable regardless. */}
+        <PanelResizeHandle className="shrink-0">
+          <button
+            onClick={() =>
+              scCollapsed
+                ? scPanelRef.current?.expand()
+                : scPanelRef.current?.collapse()
+            }
+            className="flex h-9 w-full cursor-pointer items-center gap-2 border-sidebar-border border-y px-3 transition-colors hover:bg-sidebar-accent/50"
+          >
+            <ChevronDownIcon
+              className={cn(
+                "size-3.5 text-muted-foreground transition-transform",
+                scCollapsed && "-rotate-90",
+              )}
+            />
+            <GitBranchIcon className="size-4 text-muted-foreground" />
+            <span className="font-medium text-xs">Source Control</span>
+          </button>
+        </PanelResizeHandle>
 
-            <Panel
-              ref={scPanelRef}
-              defaultSize={25}
-              minSize={0}
-              collapsible
-              collapsedSize={0}
-              onCollapse={() => setScCollapsed(true)}
-              onExpand={() => setScCollapsed(false)}
-            >
-              <SourceControl />
-            </Panel>
-          </>
-        )}
+        <Panel
+          ref={scPanelRef}
+          defaultSize={25}
+          minSize={0}
+          collapsible
+          collapsedSize={0}
+          onCollapse={() => setScCollapsed(true)}
+          onExpand={() => setScCollapsed(false)}
+        >
+          <SourceControl />
+        </Panel>
 
         {/* Outline header doubles as the resize handle */}
         <PanelResizeHandle className="shrink-0">

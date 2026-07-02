@@ -48,8 +48,22 @@ export function getProjectDir(): string {
     fs.mkdirSync(buildDir, { recursive: true });
   }
   const gitignore = path.join(buildDir, ".gitignore");
+  // Ignore everything under .openlatex/ (compile cache, the AI index,
+  // conversation history — all regenerable/ephemeral) EXCEPT the knowledge
+  // base's raw sources, which are real user data (uploaded PDFs/notes) and
+  // should be versioned in the project's own repo like any other file.
+  // Each parent directory needs its own "!" — git won't recurse into an
+  // already-ignored directory to check a deeper negation.
+  const desiredGitignore = "*\n!ai/\n!ai/sources/\n!ai/sources/**\n";
   if (!fs.existsSync(gitignore)) {
-    fs.writeFileSync(gitignore, "*\n", "utf8");
+    fs.writeFileSync(gitignore, desiredGitignore, "utf8");
+  } else {
+    const current = fs.readFileSync(gitignore, "utf8");
+    // Only upgrade the known untouched old default (blanket "ignore
+    // everything") — never overwrite a gitignore that's been customized.
+    if (current === "*\n") {
+      fs.writeFileSync(gitignore, desiredGitignore, "utf8");
+    }
   }
 
   return real;

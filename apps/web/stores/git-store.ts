@@ -8,6 +8,7 @@ import {
   commitChanges,
   pullChanges,
   pushChanges,
+  initGitRepo,
   fetchGitLog,
   fetchCommitDetail,
   restoreFileAt,
@@ -62,6 +63,7 @@ interface GitState {
   loadInfo: () => Promise<void>;
   loadStatus: () => Promise<void>;
   refresh: () => Promise<void>;
+  initRepo: () => Promise<void>;
   stageFile: (path: string) => Promise<void>;
   unstageFile: (path: string) => Promise<void>;
   commit: (message: string) => Promise<string>;
@@ -142,6 +144,24 @@ export const useGitStore = create<GitState>((set, get) => ({
     set({ loading: true, error: null });
     await Promise.all([get().loadInfo(), get().loadStatus()]);
     set({ loading: false });
+  },
+
+  async initRepo() {
+    set({ actionLoading: true, error: null });
+    try {
+      await initGitRepo();
+      await get().refresh();
+    } catch (error) {
+      set({
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to initialize repository",
+      });
+      throw error;
+    } finally {
+      set({ actionLoading: false });
+    }
   },
 
   async stageFile(path: string) {

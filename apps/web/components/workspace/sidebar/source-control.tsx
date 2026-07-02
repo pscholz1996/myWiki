@@ -10,6 +10,7 @@ import {
   RefreshCwIcon,
   FileTextIcon,
   Loader2Icon,
+  GitBranchPlusIcon,
   ChevronDownIcon,
   HistoryIcon,
 } from "lucide-react";
@@ -79,6 +80,7 @@ export function SourceControl() {
   const pull = useGitStore((s) => s.pull);
   const push = useGitStore((s) => s.push);
   const refresh = useGitStore((s) => s.refresh);
+  const initRepo = useGitStore((s) => s.initRepo);
   const remote = useGitStore((s) => s.remote);
   const actionLoading = useGitStore((s) => s.actionLoading);
   const ahead = useGitStore((s) => s.ahead);
@@ -87,10 +89,39 @@ export function SourceControl() {
   const [commitMsg, setCommitMsg] = useState("");
   const [historyOpen, setHistoryOpen] = useState(false);
 
+  // Git is entirely optional — a project works fully "offline" without it.
+  // This is the one explicit opt-in action; nothing else in the app calls
+  // `git init` on its own.
+  const handleInit = async () => {
+    try {
+      await initRepo();
+      toast.success("Repository initialized");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to initialize");
+    }
+  };
+
   if (!isGitRepo) {
     return (
-      <div className="px-3 py-2 text-muted-foreground text-xs">
-        Not a git repository
+      <div className="flex flex-col items-center gap-2 px-3 py-4 text-center">
+        <div className="text-muted-foreground text-xs">
+          This project isn&apos;t a git repository. Version history is
+          entirely optional.
+        </div>
+        <Button
+          variant="secondary"
+          size="sm"
+          className="h-7 text-xs"
+          onClick={handleInit}
+          disabled={actionLoading}
+        >
+          {actionLoading ? (
+            <Loader2Icon className="mr-1.5 size-3.5 animate-spin" />
+          ) : (
+            <GitBranchPlusIcon className="mr-1.5 size-3.5" />
+          )}
+          Initialize Repository
+        </Button>
       </div>
     );
   }

@@ -77,6 +77,12 @@ export async function pushChanges(): Promise<{ ok: boolean; output: string }> {
   return res.json();
 }
 
+export async function initGitRepo(): Promise<{ ok: boolean }> {
+  const res = await fetch("/api/git/init", { method: "POST" });
+  if (!res.ok) throw await errFrom(res);
+  return res.json();
+}
+
 export async function fetchGitLog(
   offset: number,
   limit: number,
