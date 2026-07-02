@@ -128,6 +128,9 @@ export async function POST(req: Request) {
     const projectDir = getProjectDir();
     const conversationId = body.conversationId ?? randomUUID();
     const existing = await readAiConversation(projectDir, conversationId);
+    // No prior turns means no SDK session has been established yet — see
+    // the isNewSession/resume split in runOpenLatexChatTurn.
+    const isNewSession = !existing || existing.messages.length === 0;
     let conversation: AiConversation =
       existing ??
       (await createAiConversation({
@@ -188,6 +191,7 @@ export async function POST(req: Request) {
             projectDir,
             conversation,
             body,
+            isNewSession,
           )) {
             push("sdk", sdkMessage);
             collectCitation(sdkMessage, pendingCitations, citations);

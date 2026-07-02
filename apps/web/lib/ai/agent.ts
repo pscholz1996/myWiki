@@ -280,15 +280,25 @@ export async function* runOpenLatexChatTurn(
   projectDir: string,
   conversation: AiConversation,
   request: AiChatRequest,
+  isNewSession: boolean,
 ) {
   const prompt = serializePrompt(conversation, request);
   const sessionId = conversation.sdkSessionId ?? conversation.id;
+
+  // `sessionId` creates a session under a caller-chosen id and is only valid
+  // on the first turn; resuming an existing session must use `resume`
+  // instead (the SDK does not treat repeating `sessionId` as a resume — it
+  // conflicts with the already-persisted session and crashes the CLI
+  // process on turn 2+).
+  const sessionOptions = isNewSession
+    ? { sessionId }
+    : { resume: sessionId };
 
   const q = query({
     prompt,
     options: {
       cwd: projectDir,
-      sessionId,
+      ...sessionOptions,
       persistSession: true,
       permissionMode: "bypassPermissions",
       allowDangerouslySkipPermissions: true,
