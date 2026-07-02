@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import {
   appendMessage,
   createAiConversation,
+  mergeUsage,
   readAiConversation,
   updateAiConversation,
 } from "@/lib/ai/conversations";
@@ -180,6 +181,14 @@ export async function POST(req: Request) {
 
         let assistantText = "";
         let usage: AiUsage | undefined;
+        // Cumulative across the whole conversation, not just this turn —
+        // what the panel's "N in / M out" header is meant to represent.
+        let cumulativeUsage: AiUsage | undefined = conversation.usage;
+        // Approximate current context-window size: cacheReadTokens +
+        // inputTokens of the latest turn is what was actually loaded for
+        // that API call (see the AiConversation.contextTokens doc comment
+        // for why this is an estimate, not the SDK's exact figure).
+        let contextTokens: number | undefined;
         const pendingCitations = new Map<
           string,
           { sourceId: string; page: number; quote: string }
@@ -208,7 +217,9 @@ export async function POST(req: Request) {
             if (kind === "result") {
               usage = extractUsage(sdkMessage);
               if (usage) {
-                push("usage", usage);
+                cumulativeUsage = mergeUsage(conversation.usage, usage);
+                contextTokens = (usage.cacheReadTokens ?? 0) + usage.inputTokens;
+                push("usage", { usage: cumulativeUsage, contextTokens });
               }
             }
 
@@ -241,7 +252,8 @@ export async function POST(req: Request) {
             conversation,
             assistantMessage,
           );
-          nextConversation.usage = usage;
+          nextConversation.usage = cumulativeUsage;
+          nextConversation.contextTokens = contextTokens ?? conversation.contextTokens;
           await updateAiConversation(
             projectDir,
             nextConversation.id,
@@ -249,7 +261,8 @@ export async function POST(req: Request) {
           );
           push("assistant_done", {
             conversationId: nextConversation.id,
-            usage,
+            usage: cumulativeUsage,
+            contextTokens: nextConversation.contextTokens,
             content: assistantMessage.content,
             citations: assistantMessage.citations,
           });

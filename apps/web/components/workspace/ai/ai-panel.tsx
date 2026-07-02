@@ -25,7 +25,7 @@ import {
   SparklesIcon,
   Trash2Icon,
 } from "lucide-react";
-import type { AiConversation } from "@/lib/ai/types";
+import { DEFAULT_CONTEXT_WINDOW_TOKENS, type AiConversation } from "@/lib/ai/types";
 import { toast } from "sonner";
 
 export function AiPanel() {
@@ -152,11 +152,26 @@ export function AiPanel() {
             Research, write, and verify against your sources.
           </div>
         </div>
-        <div className="flex items-center gap-2 text-muted-foreground text-xs">
-          <BadgeInfoIcon className="size-3.5" />
-          {activeConversation?.usage
-            ? `${activeConversation.usage.inputTokens} in · ${activeConversation.usage.outputTokens} out`
-            : "Token usage pending"}
+        <div className="flex flex-col items-end gap-0.5 text-muted-foreground text-xs">
+          <div className="flex items-center gap-2">
+            <BadgeInfoIcon className="size-3.5" />
+            {activeConversation?.usage
+              ? `${activeConversation.usage.inputTokens.toLocaleString()} in · ${activeConversation.usage.outputTokens.toLocaleString()} out`
+              : "Token usage pending"}
+          </div>
+          {activeConversation?.contextTokens ? (
+            <div
+              title="Estimated from the most recent turn's input + cached tokens against Sonnet 5's 1M context window — not an exact figure."
+            >
+              ~{Math.min(
+                100,
+                Math.round(
+                  (activeConversation.contextTokens / DEFAULT_CONTEXT_WINDOW_TOKENS) * 100,
+                ),
+              )}
+              % of context window ({activeConversation.contextTokens.toLocaleString()} tokens)
+            </div>
+          ) : null}
         </div>
       </div>
 

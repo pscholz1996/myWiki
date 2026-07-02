@@ -43,8 +43,24 @@ export interface AiConversation {
   messages: AiMessage[];
   sourceIds: string[];
   updatedAt: string;
+  /** Cumulative usage across every turn in this conversation (see mergeUsage). */
   usage?: AiUsage;
+  /**
+   * Approximate size of the context window as of the most recent turn
+   * (that turn's cacheReadTokens + inputTokens — i.e. what was actually
+   * loaded for that API call). Not the SDK's precise getContextUsage()
+   * breakdown (that requires a persistent streaming session we don't
+   * keep); good enough to warn before a conversation gets uncomfortably
+   * long.
+   */
+  contextTokens?: number;
 }
+
+// Sonnet 5's context window (the only model this app currently requests).
+// Not derived from the SDK response because control-request methods like
+// getContextUsage() need a persistent streaming session; this is a static
+// fallback that's accurate as long as the app keeps defaulting to Sonnet 5.
+export const DEFAULT_CONTEXT_WINDOW_TOKENS = 1_000_000;
 
 export interface AiConversationSummary {
   id: string;

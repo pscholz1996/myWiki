@@ -81,24 +81,28 @@ function upsertAssistantChunk(conversation: AiConversation, chunk: string): AiCo
 function finalizeAssistantMessage(
   conversation: AiConversation,
   content: string,
-  usage?: AiConversation["usage"],
+  cumulativeUsage?: AiConversation["usage"],
   citations?: AiMessage["citations"],
+  contextTokens?: number,
 ): AiConversation {
   const messages = [...conversation.messages];
   const last = messages[messages.length - 1];
 
+  // cumulativeUsage is the whole conversation's running total (see
+  // chat/route.ts), not this one message's usage — it belongs on the
+  // conversation, not the message. No per-message usage display exists
+  // today, so the message itself is finalized without a usage field.
   if (last?.role === "assistant") {
     messages[messages.length - 1] = {
       ...last,
       content,
-      usage,
       citations,
     };
   } else {
-    messages.push({ ...makeAssistantMessage(content), usage, citations });
+    messages.push({ ...makeAssistantMessage(content), citations });
   }
 
-  return { ...conversation, messages, usage };
+  return { ...conversation, messages, usage: cumulativeUsage, contextTokens };
 }
 
 function mergeConversationSummary(
@@ -398,12 +402,16 @@ export const useAiStore = create<AiState>((set, get) => ({
         }
 
         if (event.type === "usage" && event.data && typeof event.data === "object") {
-          const usage = event.data as AiConversation["usage"];
+          const data = event.data as {
+            usage?: AiConversation["usage"];
+            contextTokens?: number;
+          };
           set((state) => ({
             activeConversation: state.activeConversation
               ? {
                   ...state.activeConversation,
-                  usage,
+                  usage: data.usage,
+                  contextTokens: data.contextTokens,
                 }
               : state.activeConversation,
           }));
@@ -420,6 +428,7 @@ export const useAiStore = create<AiState>((set, get) => ({
             content?: string;
             usage?: AiConversation["usage"];
             citations?: AiMessage["citations"];
+            contextTokens?: number;
           };
 
           set((state) => ({
@@ -429,6 +438,7 @@ export const useAiStore = create<AiState>((set, get) => ({
                   data.content ?? "",
                   data.usage,
                   data.citations,
+                  data.contextTokens,
                 )
               : state.activeConversation,
           }));
