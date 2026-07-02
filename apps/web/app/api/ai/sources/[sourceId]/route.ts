@@ -7,10 +7,10 @@ export const runtime = "nodejs";
 
 export async function DELETE(
   _req: Request,
-  context: { params: { sourceId: string } },
+  context: { params: Promise<{ sourceId: string }> },
 ) {
   try {
-    const { sourceId } = context.params;
+    const { sourceId } = await context.params;
     const projectDir = getProjectDir();
     const manifest = await deleteAiSource(projectDir, sourceId);
     return NextResponse.json(manifest);

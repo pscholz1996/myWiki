@@ -10,13 +10,14 @@ export const runtime = "nodejs";
 
 export async function GET(
   _req: Request,
-  context: { params: { conversationId: string } },
+  context: { params: Promise<{ conversationId: string }> },
 ) {
   try {
+    const { conversationId } = await context.params;
     const projectDir = getProjectDir();
     const conversation = await readAiConversation(
       projectDir,
-      context.params.conversationId,
+      conversationId,
     );
     if (!conversation) {
       return NextResponse.json(
@@ -39,11 +40,12 @@ export async function GET(
 
 export async function DELETE(
   _req: Request,
-  context: { params: { conversationId: string } },
+  context: { params: Promise<{ conversationId: string }> },
 ) {
   try {
+    const { conversationId } = await context.params;
     const projectDir = getProjectDir();
-    await deleteAiConversation(projectDir, context.params.conversationId);
+    await deleteAiConversation(projectDir, conversationId);
     return NextResponse.json({ ok: true });
   } catch (error) {
     if (error instanceof NoProjectSelectedError) {
