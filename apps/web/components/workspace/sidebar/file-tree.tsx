@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import type { FsNode } from "@/lib/fs/fs-client";
 import type { GitFileStatus } from "@/lib/git/git-client";
+import { statusColor, statusLabel } from "@/lib/git/status-format";
 import { cn } from "@/lib/utils";
 
 interface FileTreeProps {
@@ -18,45 +19,18 @@ interface FileTreeProps {
   fileStatuses?: Map<string, GitFileStatus>;
 }
 
+// Thin wrappers around the shared status-format helpers (also used by
+// Source Control and the commit history view) — this file just adds the
+// "no status" and "deleted gets struck through" cases specific to a tree
+// view.
 function gitStatusColor(status: GitFileStatus | undefined): string {
-  switch (status) {
-    case "modified":
-      return "text-yellow-500";
-    case "staged":
-    case "staged-modified":
-    case "staged-deleted":
-    case "renamed":
-      return "text-green-500";
-    case "untracked":
-      return "text-green-700 dark:text-green-400";
-    case "deleted":
-      return "text-red-400 line-through";
-    case "conflicted":
-      return "text-red-500";
-    default:
-      return "";
-  }
+  if (!status) return "";
+  if (status === "deleted") return `${statusColor(status)} line-through`;
+  return statusColor(status);
 }
 
 function gitStatusBadge(status: GitFileStatus | undefined): string | null {
-  switch (status) {
-    case "modified":
-    case "staged-modified":
-      return "M";
-    case "staged":
-      return "A";
-    case "untracked":
-      return "?";
-    case "deleted":
-    case "staged-deleted":
-      return "D";
-    case "renamed":
-      return "R";
-    case "conflicted":
-      return "C";
-    default:
-      return null;
-  }
+  return status ? statusLabel(status) : null;
 }
 
 /** Compute the "most severe" git status among all descendants of a directory. */
