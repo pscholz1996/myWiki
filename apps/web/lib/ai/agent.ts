@@ -67,9 +67,9 @@ const INTENT_GUIDANCE: Record<AiIntent, string> = {
   research:
     "- Current intent is Research: focus on searching the knowledge base and synthesizing what the sources say. Verify every factual claim with cite() before stating it. Don't edit project files unless the user explicitly asks you to.",
   write:
-    "- Current intent is Write: focus on drafting or revising prose directly in the project's .tex files with read_project_file/edit_project_file. Any source-backed claim you add still needs a cite()-verified quote before it goes in the text.",
+    "- Current intent is Write: focus on drafting or revising prose directly in the project's .tex files with read_project_file/replace_in_project_file. Any source-backed claim you add still needs a cite()-verified quote before it goes in the text.",
   organize:
-    "- Current intent is Organize: focus on the project's structure — file layout, section order, references — over long-form writing or literature search. Prefer targeted edit_project_file changes and explain structural suggestions before making large changes.",
+    "- Current intent is Organize: focus on the project's structure — file layout, section order, references — over long-form writing or literature search. Prefer targeted replace_in_project_file changes and explain structural suggestions before making large changes.",
 };
 
 async function serializePrompt(
@@ -87,6 +87,7 @@ async function serializePrompt(
     "Follow these rules:",
     "- Use the OpenLatex tools to search the knowledge base, read original sources, verify exact quotes, and edit project files.",
     "- If you don't already know the project's file layout (or need to find where something lives), call list_project_files first instead of guessing paths.",
+    "- When changing part of an existing file, use replace_in_project_file, not edit_project_file — it only resends the part that changes instead of the whole file. Reserve edit_project_file for new files or a genuine full rewrite.",
     "- Never state a source-backed fact unless it has been verified against the original source text.",
     "- When you make a claim from a source, first search the KB, then verify the exact quote on the page with cite().",
     "- Prefer concise answers with explicit citations and page numbers.",
@@ -172,6 +173,78 @@ async function editProjectTextFile(
   await fs.mkdir(path.dirname(absPath), { recursive: true });
   echo.recordWrite(absPath);
   await fs.writeFile(absPath, content, "utf8");
+
+  const stat = await fs.stat(absPath);
+  return callResult({
+    path: getProjectTextPath(absPath),
+    mtime: stat.mtimeMs,
+  });
+}
+
+export type ExactReplaceResult =
+  | { content: string }
+  | { error: string };
+
+// oldText must match the file's current content exactly once, so the model
+// has to prove it read the real text (via read_project_file) rather than
+// guessing, and the resulting diff is exactly as big as the actual change —
+// no ambiguity about which occurrence was meant, no silent edit of the
+// wrong spot.
+export function applyExactReplace(
+  content: string,
+  oldText: string,
+  newText: string,
+): ExactReplaceResult {
+  const occurrences = content.split(oldText).length - 1;
+
+  if (occurrences === 0) {
+    return {
+      error:
+        "old_text not found in the file. It must match the file's current exact text, including whitespace and line breaks — call read_project_file first and copy the exact snippet.",
+    };
+  }
+
+  if (occurrences > 1) {
+    return {
+      error: `old_text matches ${occurrences} places in the file. Include more surrounding context so it matches exactly once.`,
+    };
+  }
+
+  // Function-form replacement avoids String.replace's special "$&"/"$1"
+  // substitution patterns in newText — LaTeX content is full of literal
+  // "$" (math mode), which would otherwise be misinterpreted.
+  return { content: content.replace(oldText, () => newText) };
+}
+
+// A full-file overwrite means resending an entire chapter (easily 10+ pages
+// on a thesis-scale project) to change one sentence — expensive in tokens
+// and a large blast radius for a small change. This does a literal
+// find-and-replace instead (see applyExactReplace).
+async function replaceInProjectTextFile(
+  projectDir: string,
+  userPath: string,
+  oldText: string,
+  newText: string,
+): Promise<CallToolResult> {
+  const absPath = resolveInProject(projectDir, userPath);
+  const ext = path.extname(absPath).toLowerCase();
+
+  if (!TEXT_EXTS.has(ext)) {
+    return callResult(
+      { error: "Only text files can be edited with this tool" },
+      true,
+    );
+  }
+
+  const content = await fs.readFile(absPath, "utf8");
+  const result = applyExactReplace(content, oldText, newText);
+
+  if ("error" in result) {
+    return callResult({ error: result.error }, true);
+  }
+
+  echo.recordWrite(absPath);
+  await fs.writeFile(absPath, result.content, "utf8");
 
   const stat = await fs.stat(absPath);
   return callResult({
@@ -318,7 +391,7 @@ export function createOpenLatexMcpServer(
       ),
       tool(
         "edit_project_file",
-        "Overwrite a text file in the current OpenLatex project.",
+        "Overwrite a text file in the current OpenLatex project with entirely new content. Use only for creating a new file or a full rewrite — for a change to part of an existing file, use replace_in_project_file instead so you don't resend the whole file.",
         {
           path: z.string(),
           content: z.string(),
@@ -329,6 +402,32 @@ export function createOpenLatexMcpServer(
               projectDir,
               args.path,
               args.content,
+            );
+          } catch (error) {
+            return callResult(
+              error instanceof Error
+                ? error.message
+                : "Failed to edit project file",
+              true,
+            );
+          }
+        },
+      ),
+      tool(
+        "replace_in_project_file",
+        "Make a targeted edit to an existing text file by replacing one exact snippet of its current content with new content, without resending the whole file. old_text must match the file's current content EXACTLY ONCE (read_project_file first to get the exact text/whitespace) — include enough surrounding context to make it unique. To insert new content, wrap it around a small anchor of unchanged text present in both old_text and new_text. To delete a snippet, pass an empty new_text.",
+        {
+          path: z.string(),
+          old_text: z.string().min(1),
+          new_text: z.string(),
+        },
+        async (args) => {
+          try {
+            return await replaceInProjectTextFile(
+              projectDir,
+              args.path,
+              args.old_text,
+              args.new_text,
             );
           } catch (error) {
             return callResult(

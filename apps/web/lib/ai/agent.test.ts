@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { findStaleCitedSourceIds } from "./agent";
+import { applyExactReplace, findStaleCitedSourceIds } from "./agent";
 import type { AiConversation, AiMessage } from "./types";
 
 function conversation(messages: AiMessage[]): AiConversation {
@@ -60,5 +60,35 @@ describe("findStaleCitedSourceIds — the deletion-safety gate", () => {
       ]),
     ]);
     expect(findStaleCitedSourceIds(conv, new Set(["src-2"]))).toEqual(["src-1"]);
+  });
+});
+
+describe("applyExactReplace — the targeted-edit matching gate", () => {
+  test("replaces a unique match", () => {
+    const result = applyExactReplace("intro\nbody\noutro", "body", "middle");
+    expect(result).toEqual({ content: "intro\nmiddle\noutro" });
+  });
+
+  test("errors when old_text is absent", () => {
+    const result = applyExactReplace("intro\nbody\noutro", "missing", "x");
+    expect("error" in result).toBe(true);
+  });
+
+  test("errors when old_text matches more than once, without editing", () => {
+    const result = applyExactReplace("dup\nfiller\ndup", "dup", "x");
+    expect("error" in result).toBe(true);
+  });
+
+  test("deletes the snippet when new_text is empty", () => {
+    const result = applyExactReplace("keep this\nand this", "this\nand ", "");
+    expect(result).toEqual({ content: "keep this" });
+  });
+
+  test("does not treat literal $ in new_text as a replacement pattern", () => {
+    // LaTeX math mode ("$x^2$") looks like String.replace's special "$&"
+    // substitution syntax to a naive content.replace(old, new) call — this
+    // is exactly the bug applyExactReplace's function-form replace avoids.
+    const result = applyExactReplace("Let x be a value.", "a value", "$x^2$");
+    expect(result).toEqual({ content: "Let x be $x^2$." });
   });
 });
