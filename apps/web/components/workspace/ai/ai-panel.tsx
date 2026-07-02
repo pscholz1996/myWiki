@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { DEFAULT_CONTEXT_WINDOW_TOKENS, type AiConversation } from "@/lib/ai/types";
 import { toast } from "sonner";
+import { AiMarkdown } from "./markdown";
 
 export function AiPanel() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -391,10 +392,14 @@ export function AiPanel() {
                 <div className="mb-1 text-[10px] uppercase tracking-wide opacity-60">
                   {message.role}
                 </div>
-                <div className="whitespace-pre-wrap text-sm leading-6">
-                  {message.content ||
-                    (message.role === "assistant" ? "Thinking..." : "")}
-                </div>
+                {message.role === "assistant" && message.content ? (
+                  <AiMarkdown content={message.content} />
+                ) : (
+                  <div className="whitespace-pre-wrap text-sm leading-6">
+                    {message.content ||
+                      (message.role === "assistant" ? "Thinking..." : "")}
+                  </div>
+                )}
                 {message.citations && message.citations.length > 0 ? (
                   <div className="mt-2 flex flex-wrap gap-1.5 border-t border-current/10 pt-2">
                     {message.citations.map((citation, index) => (
