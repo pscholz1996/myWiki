@@ -18,7 +18,7 @@ import {
 import { TEXT_EXTS } from "@/lib/fs/project-dir";
 import { resolveInProject } from "@/lib/fs/sandbox";
 import { echo } from "@/lib/fs/watcher";
-import type { AiChatRequest, AiConversation } from "@/lib/ai/types";
+import type { AiChatRequest, AiConversation, AiIntent } from "@/lib/ai/types";
 
 function callResult(text: unknown, isError = false): CallToolResult {
   return {
@@ -57,6 +57,20 @@ export function findStaleCitedSourceIds(
   return [...citedSourceIds].filter((id) => !currentSourceIds.has(id));
 }
 
+// Intent only used to be an informational label in the prompt ("Intent:
+// research") — it didn't change how the model actually behaved. These give
+// each mode a distinct default posture without restricting which tools are
+// available (the model can still search, cite, or edit regardless of
+// intent; this just changes what it should reach for first).
+const INTENT_GUIDANCE: Record<AiIntent, string> = {
+  research:
+    "- Current intent is Research: focus on searching the knowledge base and synthesizing what the sources say. Verify every factual claim with cite() before stating it. Don't edit project files unless the user explicitly asks you to.",
+  write:
+    "- Current intent is Write: focus on drafting or revising prose directly in the project's .tex files with read_project_file/edit_project_file. Any source-backed claim you add still needs a cite()-verified quote before it goes in the text.",
+  organize:
+    "- Current intent is Organize: focus on the project's structure — file layout, section order, references — over long-form writing or literature search. Prefer targeted edit_project_file changes and explain structural suggestions before making large changes.",
+};
+
 async function serializePrompt(
   projectDir: string,
   conversation: AiConversation,
@@ -65,6 +79,7 @@ async function serializePrompt(
   const manifest = await listAiSources(projectDir);
   const currentSourceIds = new Set(manifest.sources.map((source) => source.id));
   const staleSourceIds = findStaleCitedSourceIds(conversation, currentSourceIds);
+  const intent = request.intent ?? conversation.intent;
 
   const lines = [
     "You are the OpenLatex AI assistant for scientific writing.",
@@ -78,7 +93,8 @@ async function serializePrompt(
     staleSourceIds.length > 0
       ? `- The following source IDs were cited earlier in this conversation but have since been permanently REMOVED from the knowledge base: ${staleSourceIds.join(", ")}. Do not restate, confirm, or rely on anything from them. If asked, say the source was removed from the knowledge base and that information can no longer be verified.`
       : null,
-    `Intent: ${request.intent ?? conversation.intent}`,
+    INTENT_GUIDANCE[intent],
+    `Intent: ${intent}`,
     `Conversation title: ${conversation.title}`,
     request.sourceIds && request.sourceIds.length > 0
       ? `Selected sources: ${request.sourceIds.join(", ")}`
