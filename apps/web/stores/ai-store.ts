@@ -75,6 +75,7 @@ function finalizeAssistantMessage(
   conversation: AiConversation,
   content: string,
   usage?: AiConversation["usage"],
+  citations?: AiMessage["citations"],
 ): AiConversation {
   const messages = [...conversation.messages];
   const last = messages[messages.length - 1];
@@ -84,9 +85,10 @@ function finalizeAssistantMessage(
       ...last,
       content,
       usage,
+      citations,
     };
   } else {
-    messages.push({ ...makeAssistantMessage(content), usage });
+    messages.push({ ...makeAssistantMessage(content), usage, citations });
   }
 
   return { ...conversation, messages, usage };
@@ -364,6 +366,7 @@ export const useAiStore = create<AiState>((set, get) => ({
           const data = event.data as {
             content?: string;
             usage?: AiConversation["usage"];
+            citations?: AiMessage["citations"];
           };
 
           set((state) => ({
@@ -372,6 +375,7 @@ export const useAiStore = create<AiState>((set, get) => ({
                   state.activeConversation,
                   data.content ?? "",
                   data.usage,
+                  data.citations,
                 )
               : state.activeConversation,
           }));

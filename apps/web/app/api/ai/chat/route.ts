@@ -9,6 +9,7 @@ import {
 import { runOpenLatexChatTurn } from "@/lib/ai/agent";
 import type {
   AiChatRequest,
+  AiCitation,
   AiConversation,
   AiMessage,
   AiUsage,
@@ -55,6 +56,64 @@ function assistantTextFromMessage(message: any): string {
     .filter((block: any) => block?.type === "text")
     .map((block: any) => block.text)
     .join("");
+}
+
+/**
+ * Track pending mcp__openlatex__cite tool calls by tool_use id, then
+ * confirm them as citations only once their tool_result comes back
+ * verified. A cite() call that fails verification (quote not found on the
+ * page) must never surface to the user as a citation.
+ */
+function collectCitation(
+  sdkMessage: any,
+  pending: Map<string, { sourceId: string; page: number; quote: string }>,
+  citations: AiCitation[],
+): void {
+  const kind = sdkMessage?.type;
+  const blocks = sdkMessage?.message?.content ?? [];
+
+  if (kind === "assistant") {
+    for (const block of blocks) {
+      if (
+        block?.type === "tool_use" &&
+        block.name === "mcp__openlatex__cite" &&
+        block.input &&
+        typeof block.input.sourceId === "string" &&
+        typeof block.input.page === "number" &&
+        typeof block.input.quote === "string"
+      ) {
+        pending.set(block.id, {
+          sourceId: block.input.sourceId,
+          page: block.input.page,
+          quote: block.input.quote,
+        });
+      }
+    }
+    return;
+  }
+
+  if (kind === "user") {
+    for (const block of blocks) {
+      if (block?.type !== "tool_result") continue;
+      const call = pending.get(block.tool_use_id);
+      if (!call) continue;
+      pending.delete(block.tool_use_id);
+
+      const text = Array.isArray(block.content)
+        ? block.content.find((c: any) => c?.type === "text")?.text
+        : undefined;
+      if (typeof text !== "string") continue;
+
+      try {
+        const parsed = JSON.parse(text);
+        if (parsed?.verified === true) {
+          citations.push(call);
+        }
+      } catch {
+        // Not a JSON tool result — not a verified citation.
+      }
+    }
+  }
 }
 
 export async function POST(req: Request) {
@@ -118,6 +177,11 @@ export async function POST(req: Request) {
 
         let assistantText = "";
         let usage: AiUsage | undefined;
+        const pendingCitations = new Map<
+          string,
+          { sourceId: string; page: number; quote: string }
+        >();
+        const citations: AiCitation[] = [];
 
         try {
           for await (const sdkMessage of runOpenLatexChatTurn(
@@ -126,6 +190,7 @@ export async function POST(req: Request) {
             body,
           )) {
             push("sdk", sdkMessage);
+            collectCitation(sdkMessage, pendingCitations, citations);
 
             const kind = (sdkMessage as any)?.type;
             if (kind === "assistant") {
@@ -150,6 +215,7 @@ export async function POST(req: Request) {
             content: assistantText.trim(),
             createdAt: nowIso(),
             usage,
+            citations: citations.length > 0 ? citations : undefined,
           };
 
           const nextConversation = appendMessage(
@@ -166,6 +232,7 @@ export async function POST(req: Request) {
             conversationId: nextConversation.id,
             usage,
             content: assistantMessage.content,
+            citations: assistantMessage.citations,
           });
           controller.close();
         } catch (error) {

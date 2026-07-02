@@ -688,6 +688,13 @@ export async function getAiSourceRecord(
   return manifest.sources.find((source) => source.id === sourceId) ?? null;
 }
 
+export function getAiSourceFilePath(
+  projectDir: string,
+  source: AiSourceRecord,
+): string {
+  return path.join(projectDir, ".openlatex", "ai", "sources", source.storedName);
+}
+
 export async function readAiSourcePage(
   projectDir: string,
   sourceId: string,

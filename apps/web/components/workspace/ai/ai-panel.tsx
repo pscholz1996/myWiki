@@ -14,6 +14,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useAiStore } from "@/stores/ai-store";
 import {
   BadgeInfoIcon,
+  BookOpenIcon,
   FileTextIcon,
   FolderPlusIcon,
   Loader2Icon,
@@ -47,6 +48,10 @@ export function AiPanel() {
   const createConversation = useAiStore((state) => state.createConversation);
   const selectConversation = useAiStore((state) => state.selectConversation);
   const sendMessage = useAiStore((state) => state.sendMessage);
+
+  const sourceNameById = new Map(
+    sources.map((source) => [source.id, source.originalName]),
+  );
 
   useEffect(() => {
     void Promise.all([loadSources(), loadConversations()]);
@@ -296,6 +301,26 @@ export function AiPanel() {
                   {message.content ||
                     (message.role === "assistant" ? "Thinking..." : "")}
                 </div>
+                {message.citations && message.citations.length > 0 ? (
+                  <div className="mt-2 flex flex-wrap gap-1.5 border-t border-current/10 pt-2">
+                    {message.citations.map((citation, index) => (
+                      <a
+                        key={`${citation.sourceId}-${citation.page}-${index}`}
+                        href={`/api/ai/sources/${citation.sourceId}/file#page=${citation.page}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        title={citation.quote}
+                        className="inline-flex items-center gap-1 rounded-full border bg-background/80 px-2 py-0.5 text-[11px] text-foreground/80 hover:bg-background"
+                      >
+                        <BookOpenIcon className="size-3" />
+                        {sourceNameById.get(citation.sourceId) ??
+                          "Unknown source"}
+                        {" · p."}
+                        {citation.page}
+                      </a>
+                    ))}
+                  </div>
+                ) : null}
               </div>
             ))
           ) : (
