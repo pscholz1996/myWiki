@@ -247,7 +247,7 @@ async function embedTexts(texts: string[]): Promise<number[][]> {
   return vectors;
 }
 
-function chunkText(
+export function chunkText(
   text: string,
   maxChars = 1200,
   overlap = 160,
