@@ -6,6 +6,7 @@ import { ArrowLeftRightIcon } from "lucide-react";
 import { Sidebar } from "./sidebar/sidebar";
 import { LatexEditor } from "./editor/latex-editor";
 import { PdfPreview } from "./preview/pdf-preview";
+import { AiPanel } from "./ai/ai-panel";
 import { useFsStartup } from "@/hooks/use-fs-startup";
 import { ProjectSwitcherButton } from "@/components/project/project-switcher-button";
 
@@ -28,6 +29,12 @@ export function WorkspaceLayout({ current, recent }: Props) {
   const previewPanel = (
     <Panel defaultSize={42.5} minSize={25}>
       <PdfPreview />
+    </Panel>
+  );
+
+  const aiPanel = (
+    <Panel defaultSize={25} minSize={20} collapsible collapsedSize={0}>
+      <AiPanel />
     </Panel>
   );
 
@@ -57,6 +64,10 @@ export function WorkspaceLayout({ current, recent }: Props) {
         </PanelResizeHandle>
 
         {swapped ? editorPanel : previewPanel}
+
+        <PanelResizeHandle className="w-px bg-border transition-colors hover:bg-ring" />
+
+        {aiPanel}
       </PanelGroup>
     </div>
   );
