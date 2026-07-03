@@ -14,6 +14,7 @@ import {
   normalizeWhitespace,
   readAiSourceFull,
   readAiSourcePage,
+  saveResearchNote,
   searchAiKnowledgeBase,
   setAiSourceBibKey,
   verifyAiCitation,
@@ -68,7 +69,7 @@ export function findStaleCitedSourceIds(
 // intent; this just changes what it should reach for first).
 const INTENT_GUIDANCE: Record<AiIntent, string> = {
   research:
-    "- Current intent is Research: focus on searching the knowledge base and synthesizing what the sources say. Verify every factual claim with cite() before stating it. Don't edit project files unless the user explicitly asks you to.",
+    "- Current intent is Research: focus on searching the knowledge base broadly and synthesizing what ALL the relevant sources say, not just the first one found. Verify every factual claim with cite() before stating it. Don't edit project files unless the user explicitly asks you to.",
   write:
     "- Current intent is Write: focus on drafting or revising prose directly in the project's .tex files with read_project_file/replace_in_project_file. Any source-backed claim you add still needs a cite()-verified quote before it goes in the text.",
   organize:
@@ -93,10 +94,12 @@ async function serializePrompt(
     "- When changing part of an existing file, use replace_in_project_file, not edit_project_file — it only resends the part that changes instead of the whole file. Reserve edit_project_file for new files or a genuine full rewrite.",
     "- Never state a source-backed fact unless it has been verified against the original source text.",
     "- When you make a claim from a source, first search the KB, then verify the exact quote on the page with cite().",
+    "- For a substantive question (\"how does X work\", \"what does the literature say about Y\"), don't stop at the first useful chunk. Search from multiple angles/phrasings — different terms, synonyms, related sub-questions — to gather what every relevant source in the knowledge base says, the way a search engine's AI overview draws on many results, then synthesize one holistic, evidence-based answer instead of a single quote. Breadth of synthesis never reduces citation rigor: every distinct claim in that answer still needs its own cite()-verified quote and its own citation (source + page), so the user can open that exact source at that exact page and read further themselves.",
     "- Prefer concise answers with explicit citations and page numbers.",
     "- If a quote cannot be verified, say so and keep searching instead of guessing.",
     "- A citation you made earlier in THIS conversation is not automatically still valid. Sources can be deleted mid-conversation. Before restating, confirming, repeating, or relying on any earlier citation — even one you already verified — you MUST call cite() again in this turn. Never describe something as \"verified\" unless cite() succeeded in this exact turn.",
     "- When you're adding a source-backed sentence into the .tex text itself (not just discussing it in chat), a chat citation chip isn't enough: after cite() succeeds, call ensure_bibtex_entry to get a real cite key, then insert \\cite{key} at that spot with replace_in_project_file.",
+    "- Search results and browse_knowledge_base may include research notes you saved in earlier turns (kind \"note\") alongside primary sources. A note is useful context — your own prior synthesis — but never a substitute for a fresh cite() against the primary source it's based on; cite() will refuse to verify a quote against a note even if the text matches. When you've built a genuinely new synthesis worth keeping (e.g. after a broad multi-source search on a substantive question), save it with save_research_note so future turns don't have to redo that search from scratch.",
     staleSourceIds.length > 0
       ? `- The following source IDs were cited earlier in this conversation but have since been permanently REMOVED from the knowledge base: ${staleSourceIds.join(", ")}. Do not restate, confirm, or rely on anything from them. If asked, say the source was removed from the knowledge base and that information can no longer be verified.`
       : null,
@@ -303,7 +306,7 @@ export function bibtexHasKey(bibContent: string, key: string): boolean {
 // only as an informal "source · page" chip in the chat panel. Idempotent
 // per source (see AiSourceRecord.bibKey) so re-citing the same paper across
 // a conversation doesn't append duplicate .bib entries.
-async function ensureBibtexEntry(
+export async function ensureBibtexEntry(
   projectDir: string,
   args: {
     sourceId: string;
@@ -326,6 +329,18 @@ async function ensureBibtexEntry(
   const source = await getAiSourceRecord(projectDir, args.sourceId);
   if (!source) {
     return callResult({ error: "Source not found" }, true);
+  }
+
+  // Mirrors verifyAiCitation's guard — a research note is the AI's own
+  // synthesis, not a primary source, so it must never become a
+  // \cite{}-linkable BibTeX entry either.
+  if (source.kind === "note") {
+    return callResult(
+      {
+        error: `"${source.originalName}" is an AI-authored research note, not a primary source — it cannot become a BibTeX entry. Cite the primary source(s) it draws on instead.`,
+      },
+      true,
+    );
   }
 
   if (source.bibKey) {
@@ -380,23 +395,41 @@ async function ensureBibtexEntry(
     );
   }
 
+  // Fields the model omits get defaulted from the source's own PDF metadata
+  // — but only when it's provenance "pdf-metadata" (read straight from the
+  // PDF's metadata dictionary), never a "heuristic" guess. A heuristic title
+  // is good enough for a human skimming a source list; it's not verified
+  // enough to silently become part of a citation.
+  const fields = { ...args.fields };
+  if (source.metadata?.provenance === "pdf-metadata") {
+    if (!fields.title?.trim() && source.metadata.title) {
+      fields.title = source.metadata.title;
+    }
+    if (!fields.author?.trim() && source.metadata.authors?.length) {
+      fields.author = source.metadata.authors.join(" and ");
+    }
+    if (!fields.year?.trim() && source.metadata.year) {
+      fields.year = source.metadata.year;
+    }
+  }
+
   // Best-effort sanity check, not a hard verification gate like cite() —
   // BibTeX metadata (author lists, exact year) can't be checked with the
   // same certainty as an exact quote. Still worth flagging when the title
   // doesn't even loosely match the source's own first page.
   let titleVerified: boolean | null = null;
-  if (args.fields.title) {
+  if (fields.title) {
     try {
       const { text } = await readAiSourcePage(projectDir, args.sourceId, 1);
       titleVerified = normalizeWhitespace(text)
         .toLowerCase()
-        .includes(normalizeWhitespace(args.fields.title).toLowerCase());
+        .includes(normalizeWhitespace(fields.title).toLowerCase());
     } catch {
       titleVerified = null;
     }
   }
 
-  const entry = formatBibtexEntry(args.entryType, args.key, args.fields);
+  const entry = formatBibtexEntry(args.entryType, args.key, fields);
   const nextContent =
     existingContent.trim().length > 0
       ? `${existingContent.trimEnd()}\n\n${entry}`
@@ -427,7 +460,7 @@ export function createOpenLatexMcpServer(
     tools: [
       tool(
         "search_knowledge_base",
-        "Search indexed project knowledge sources for relevant chunks.",
+        "Search indexed project knowledge sources (and your own earlier research notes) for relevant chunks, ranked by combined semantic + keyword match. For a substantive question, one call is rarely enough — issue several searches with different phrasings/angles/terms to pull in everything relevant across ALL sources before you answer, the way a thorough literature review would, not just whichever source the first query happened to hit.",
         {
           query: z.string(),
           topK: z.number().int().min(1).max(10).optional(),
@@ -443,6 +476,44 @@ export function createOpenLatexMcpServer(
             scopedSourceIds,
           );
           return normalizeToolResult({ hits });
+        },
+      ),
+      tool(
+        "browse_knowledge_base",
+        "List every source and research note as a lightweight table of contents (title, kind, authors, year) without touching chunk/embedding data. Use this before searching, to see what's already available (including notes you saved in earlier turns) so you know which angles to search for.",
+        {
+          kind: z.enum(["pdf", "markdown", "text", "note"]).optional(),
+        },
+        async (args) => {
+          try {
+            const manifest = await listAiSources(projectDir);
+            const scoped =
+              scopedSourceIds && scopedSourceIds.length > 0
+                ? new Set(scopedSourceIds)
+                : null;
+            const entries = manifest.sources
+              .filter((source) => !scoped || scoped.has(source.id))
+              .filter((source) => !args.kind || source.kind === args.kind)
+              .map((source) => ({
+                id: source.id,
+                kind: source.kind,
+                title:
+                  source.kind === "note"
+                    ? source.originalName
+                    : (source.metadata?.title ?? source.originalName),
+                authors: source.metadata?.authors,
+                year: source.metadata?.year,
+                bibKey: source.bibKey,
+              }));
+            return normalizeToolResult({ sources: entries });
+          } catch (error) {
+            return callResult(
+              error instanceof Error
+                ? error.message
+                : "Failed to browse knowledge base",
+              true,
+            );
+          }
         },
       ),
       tool(
@@ -517,7 +588,7 @@ export function createOpenLatexMcpServer(
       ),
       tool(
         "ensure_bibtex_entry",
-        "Find or create a BibTeX entry in the project's .bib file for a knowledge-base source, and link them so repeated calls for the same source are idempotent. Returns the cite key — insert \\cite{key} into the .tex text yourself with replace_in_project_file. Only pass fields you can actually support from the source's own text (e.g. its title page); this is bibliographic bookkeeping, not a place to invent author/year details.",
+        "Find or create a BibTeX entry in the project's .bib file for a knowledge-base source, and link them so repeated calls for the same source are idempotent. Returns the cite key — insert \\cite{key} into the .tex text yourself with replace_in_project_file. Only pass fields you can actually support from the source's own text (e.g. its title page); this is bibliographic bookkeeping, not a place to invent author/year details. Fields you omit may be auto-filled from the PDF's own embedded metadata when available — you don't need to guess a field just to fill it in.",
         {
           source_id: z.string(),
           bib_file: z
@@ -552,6 +623,47 @@ export function createOpenLatexMcpServer(
               error instanceof Error
                 ? error.message
                 : "Failed to create BibTeX entry",
+              true,
+            );
+          }
+        },
+      ),
+      tool(
+        "save_research_note",
+        "Save your own synthesized understanding into the knowledge base so you (and future turns) can find and build on it via search_knowledge_base/browse_knowledge_base. This is YOUR analysis, not a primary source — it can never be a cite() target or become a BibTeX entry; every source-backed claim still needs its own fresh cite() against the primary source. Pass note_id to update a note you already saved (when you have a meaningfully new synthesis) instead of creating a near-duplicate.",
+        {
+          title: z.string().min(1),
+          content: z.string().min(1),
+          source_ids: z
+            .array(z.string())
+            .optional()
+            .describe(
+              "IDs of primary sources this note draws on, for traceability only — never usable to satisfy cite().",
+            ),
+          note_id: z
+            .string()
+            .optional()
+            .describe("ID of a note you saved earlier, to update it in place."),
+        },
+        async (args) => {
+          try {
+            const record = await saveResearchNote({
+              projectDir,
+              title: args.title,
+              content: args.content,
+              drawsOnSourceIds: args.source_ids,
+              noteId: args.note_id,
+            });
+            return normalizeToolResult({
+              id: record.id,
+              title: record.originalName,
+              updated: Boolean(args.note_id),
+            });
+          } catch (error) {
+            return callResult(
+              error instanceof Error
+                ? error.message
+                : "Failed to save research note",
               true,
             );
           }
