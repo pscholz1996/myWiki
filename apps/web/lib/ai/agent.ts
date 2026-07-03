@@ -23,7 +23,7 @@ import { listProjectTree, type FsNode } from "@/lib/fs/list";
 import { TEXT_EXTS } from "@/lib/fs/project-dir";
 import { resolveInProject } from "@/lib/fs/sandbox";
 import { echo } from "@/lib/fs/watcher";
-import type { AiChatRequest, AiConversation, AiIntent } from "@/lib/ai/types";
+import type { AiChatRequest, AiConversation } from "@/lib/ai/types";
 
 function callResult(text: unknown, isError = false): CallToolResult {
   return {
@@ -62,20 +62,6 @@ export function findStaleCitedSourceIds(
   return [...citedSourceIds].filter((id) => !currentSourceIds.has(id));
 }
 
-// Intent only used to be an informational label in the prompt ("Intent:
-// research") — it didn't change how the model actually behaved. These give
-// each mode a distinct default posture without restricting which tools are
-// available (the model can still search, cite, or edit regardless of
-// intent; this just changes what it should reach for first).
-const INTENT_GUIDANCE: Record<AiIntent, string> = {
-  research:
-    "- Current intent is Research: focus on searching the knowledge base broadly and synthesizing what ALL the relevant sources say, not just the first one found. Verify every factual claim with cite() before stating it. Don't edit project files unless the user explicitly asks you to.",
-  write:
-    "- Current intent is Write: focus on drafting or revising prose directly in the project's .tex files with read_project_file/replace_in_project_file. Any source-backed claim you add still needs a cite()-verified quote before it goes in the text.",
-  organize:
-    "- Current intent is Organize: focus on the project's structure — file layout, section order, references — over long-form writing or literature search. Prefer targeted replace_in_project_file changes and explain structural suggestions before making large changes.",
-};
-
 async function serializePrompt(
   projectDir: string,
   conversation: AiConversation,
@@ -84,12 +70,12 @@ async function serializePrompt(
   const manifest = await listAiSources(projectDir);
   const currentSourceIds = new Set(manifest.sources.map((source) => source.id));
   const staleSourceIds = findStaleCitedSourceIds(conversation, currentSourceIds);
-  const intent = request.intent ?? conversation.intent;
 
   const lines = [
     "You are the OpenLatex AI assistant for scientific writing.",
     "Follow these rules:",
     "- Use the OpenLatex tools to search the knowledge base, read original sources, verify exact quotes, and edit project files.",
+    "- There's no fixed mode to select — read each request and act on what it's actually asking for. A question or research request means searching the knowledge base broadly and synthesizing across every relevant source, not just editing files unless explicitly asked. A request to draft, add, or revise text means writing directly into the project's .tex files with read_project_file/replace_in_project_file. A request about structure (file layout, section order, reference organization) means focusing on that structure with targeted edits, explaining the suggestion before making large changes. These aren't exclusive — a single request can call for more than one (e.g. \"summarize what the sources say about X and add a paragraph on it\" means both searching/synthesizing AND writing into the text).",
     "- If you don't already know the project's file layout (or need to find where something lives), call list_project_files first instead of guessing paths.",
     "- When changing part of an existing file, use replace_in_project_file, not edit_project_file — it only resends the part that changes instead of the whole file. Reserve edit_project_file for new files or a genuine full rewrite.",
     "- Never state a source-backed fact unless it has been verified against the original source text.",
@@ -103,8 +89,6 @@ async function serializePrompt(
     staleSourceIds.length > 0
       ? `- The following source IDs were cited earlier in this conversation but have since been permanently REMOVED from the knowledge base: ${staleSourceIds.join(", ")}. Do not restate, confirm, or rely on anything from them. If asked, say the source was removed from the knowledge base and that information can no longer be verified.`
       : null,
-    INTENT_GUIDANCE[intent],
-    `Intent: ${intent}`,
     `Conversation title: ${conversation.title}`,
     request.sourceIds && request.sourceIds.length > 0
       ? `Selected sources: ${request.sourceIds.join(", ")}`

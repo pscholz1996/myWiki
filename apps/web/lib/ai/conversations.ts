@@ -4,7 +4,6 @@ import { ensureAiWorkspace } from "@/lib/ai/knowledge-base";
 import type {
   AiConversation,
   AiConversationSummary,
-  AiIntent,
   AiMessage,
   AiUsage,
 } from "@/lib/ai/types";
@@ -30,7 +29,6 @@ function summarizeConversation(conversation: AiConversation): AiConversationSumm
   return {
     id: conversation.id,
     title: conversation.title,
-    intent: conversation.intent,
     messageCount: conversation.messages.length,
     updatedAt: conversation.updatedAt,
     usage: conversation.usage,
@@ -93,7 +91,6 @@ export async function createAiConversation(params: {
   projectDir: string;
   conversationId: string;
   title?: string;
-  intent?: AiIntent;
   model?: string;
   sdkSessionId?: string;
   sourceIds?: string[];
@@ -101,7 +98,6 @@ export async function createAiConversation(params: {
   const conversation: AiConversation = {
     id: params.conversationId,
     title: params.title ?? "New conversation",
-    intent: params.intent ?? "research",
     model: params.model ?? "claude-sonnet-5",
     sdkSessionId: params.sdkSessionId,
     messages: [],

@@ -30,7 +30,6 @@ interface AiState {
   conversations: AiConversationSummary[];
   activeConversationId: string | null;
   activeConversation: AiConversation | null;
-  currentIntent: AiConversation["intent"];
   currentSourceIds: string[];
   loading: boolean;
   error: string | null;
@@ -54,7 +53,6 @@ interface AiState {
   selectConversation: (conversationId: string) => Promise<void>;
   removeConversation: (conversationId: string) => Promise<void>;
   sendMessage: (message: string) => Promise<void>;
-  setIntent: (intent: AiConversation["intent"]) => void;
   toggleSourceSelection: (sourceId: string) => void;
 }
 
@@ -152,7 +150,6 @@ export const useAiStore = create<AiState>((set, get) => ({
   conversations: [],
   activeConversationId: null,
   activeConversation: null,
-  currentIntent: "research",
   currentSourceIds: [],
   loading: false,
   error: null,
@@ -317,7 +314,6 @@ export const useAiStore = create<AiState>((set, get) => ({
     const conversation: AiConversation = {
       id: conversationId,
       title: title ?? "New conversation",
-      intent: get().currentIntent,
       model: "claude-sonnet-5",
       sdkSessionId: conversationId,
       messages: [],
@@ -331,7 +327,6 @@ export const useAiStore = create<AiState>((set, get) => ({
       conversations: mergeConversationSummary(state.conversations, {
         id: conversationId,
         title: conversation.title,
-        intent: conversation.intent,
         messageCount: 0,
         updatedAt: conversation.updatedAt,
         usage: conversation.usage,
@@ -348,7 +343,6 @@ export const useAiStore = create<AiState>((set, get) => ({
       set({
         activeConversationId: conversation.id,
         activeConversation: conversation,
-        currentIntent: conversation.intent,
         currentSourceIds: conversation.sourceIds,
       });
     } catch (error) {
@@ -406,7 +400,6 @@ export const useAiStore = create<AiState>((set, get) => ({
         activeConversation = {
           id: conversationId,
           title: "New conversation",
-          intent: get().currentIntent,
           model: "claude-sonnet-5",
           sdkSessionId: conversationId,
           messages: [],
@@ -431,13 +424,11 @@ export const useAiStore = create<AiState>((set, get) => ({
     set({
       activeConversationId: nextConversation.id,
       activeConversation: nextConversation,
-      currentIntent: nextConversation.intent,
     });
 
     const request: AiChatRequest = {
       conversationId: nextConversation.id,
       message: trimmed,
-      intent: nextConversation.intent,
       sourceIds: nextConversation.sourceIds,
       model: nextConversation.model,
     };
@@ -448,7 +439,6 @@ export const useAiStore = create<AiState>((set, get) => ({
           const data = event.data as {
             id?: string;
             title?: string;
-            intent?: AiConversation["intent"];
           };
 
           set((state) => ({
@@ -457,7 +447,6 @@ export const useAiStore = create<AiState>((set, get) => ({
                   ...state.activeConversation,
                   id: data.id ?? state.activeConversation.id,
                   title: data.title ?? state.activeConversation.title,
-                  intent: data.intent ?? state.activeConversation.intent,
                 }
               : state.activeConversation,
             activeConversationId: data.id ?? state.activeConversationId,
@@ -537,15 +526,6 @@ export const useAiStore = create<AiState>((set, get) => ({
     } finally {
       set({ chatLoading: false });
     }
-  },
-
-  setIntent(intent: AiConversation["intent"]) {
-    set((state) => ({
-      currentIntent: intent,
-      activeConversation: state.activeConversation
-        ? { ...state.activeConversation, intent }
-        : state.activeConversation,
-    }));
   },
 
   toggleSourceSelection(sourceId: string) {

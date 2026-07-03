@@ -174,13 +174,11 @@ export async function POST(req: Request) {
       (await createAiConversation({
         projectDir,
         conversationId,
-        intent: body.intent,
         model: body.model,
       }));
 
     conversation = {
       ...conversation,
-      intent: body.intent ?? conversation.intent,
       model: body.model ?? conversation.model,
       sourceIds: body.sourceIds ?? conversation.sourceIds,
       sdkSessionId: conversation.sdkSessionId ?? conversation.id,
@@ -213,7 +211,6 @@ export async function POST(req: Request) {
         push("conversation", {
           id: conversation.id,
           title: conversation.title,
-          intent: conversation.intent,
         });
 
         let assistantText = "";

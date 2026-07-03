@@ -1,5 +1,3 @@
-export type AiIntent = "research" | "write" | "organize";
-
 export type AiMessageRole = "user" | "assistant" | "tool";
 
 export interface AiUsage {
@@ -37,7 +35,6 @@ export interface AiSource {
 export interface AiConversation {
   id: string;
   title: string;
-  intent: AiIntent;
   model: string;
   sdkSessionId?: string;
   messages: AiMessage[];
@@ -65,7 +62,6 @@ export const DEFAULT_CONTEXT_WINDOW_TOKENS = 1_000_000;
 export interface AiConversationSummary {
   id: string;
   title: string;
-  intent: AiIntent;
   messageCount: number;
   updatedAt: string;
   usage?: AiUsage;
@@ -209,7 +205,6 @@ export type AiUploadProgressCallback = (event: AiUploadProgressEvent) => void;
 export interface AiChatRequest {
   conversationId?: string;
   message: string;
-  intent?: AiIntent;
   sourceIds?: string[];
   model?: string;
 }

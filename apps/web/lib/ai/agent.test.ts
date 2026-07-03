@@ -15,7 +15,6 @@ function conversation(messages: AiMessage[]): AiConversation {
   return {
     id: "conv-1",
     title: "Test conversation",
-    intent: "research",
     model: "claude-sonnet-5",
     messages,
     sourceIds: [],

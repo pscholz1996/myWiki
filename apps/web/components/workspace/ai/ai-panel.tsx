@@ -18,16 +18,13 @@ import {
   FolderPlusIcon,
   Loader2Icon,
   MessageSquarePlusIcon,
-  PencilLineIcon,
   SearchIcon,
-  SparklesIcon,
   Trash2Icon,
   ShieldCheckIcon,
 } from "lucide-react";
 import { SiClaude } from "@icons-pack/react-simple-icons";
 import {
   DEFAULT_CONTEXT_WINDOW_TOKENS,
-  type AiConversation,
   type AiSourceRecord,
   type AiUploadProgressEvent,
   type AuditedCitation,
@@ -160,7 +157,6 @@ export function AiPanel() {
   const activeConversationId = useAiStore(
     (state) => state.activeConversationId,
   );
-  const currentIntent = useAiStore((state) => state.currentIntent);
   const currentSourceIds = useAiStore((state) => state.currentSourceIds);
   const loading = useAiStore((state) => state.loading);
   const error = useAiStore((state) => state.error);
@@ -177,7 +173,6 @@ export function AiPanel() {
   const selectConversation = useAiStore((state) => state.selectConversation);
   const removeConversation = useAiStore((state) => state.removeConversation);
   const sendMessage = useAiStore((state) => state.sendMessage);
-  const setIntent = useAiStore((state) => state.setIntent);
   const toggleSourceSelection = useAiStore((state) => state.toggleSourceSelection);
   const compactionNotice = useAiStore((state) => state.compactionNotice);
   const dismissCompactionNotice = useAiStore(
@@ -378,39 +373,6 @@ export function AiPanel() {
       </div>
 
       <div className="grid gap-3 border-b p-3">
-        <div className="grid gap-1.5">
-          <div className="font-medium text-muted-foreground text-xs">
-            Intent
-          </div>
-          <Select
-            value={currentIntent}
-            onValueChange={(value) =>
-              setIntent(value as AiConversation["intent"])
-            }
-          >
-            <SelectTrigger className="w-full">
-              <SelectValue placeholder="Select intent" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="research">
-                <span className="flex items-center gap-2">
-                  <SearchIcon className="size-3.5" /> Research
-                </span>
-              </SelectItem>
-              <SelectItem value="write">
-                <span className="flex items-center gap-2">
-                  <PencilLineIcon className="size-3.5" /> Write
-                </span>
-              </SelectItem>
-              <SelectItem value="organize">
-                <span className="flex items-center gap-2">
-                  <SparklesIcon className="size-3.5" /> Organize
-                </span>
-              </SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
         <div className="grid gap-1.5">
           <div className="font-medium text-muted-foreground text-xs">
             Conversation
