@@ -163,7 +163,17 @@ export function PdfViewer({
       );
       if (!pageNum) return;
 
-      const pdfPage = await pdfDocRef.current.getPage(pageNum);
+      let pdfPage: pdfjs.PDFPageProxy;
+      try {
+        pdfPage = await pdfDocRef.current.getPage(pageNum);
+      } catch {
+        // The document was replaced (e.g. a recompile landed) between the
+        // click and this await — pdf.js throws from its internals rather
+        // than resolving to null, so there's nothing meaningful to inverse-
+        // sync against. The user can just double-click again once the new
+        // PDF has settled.
+        return;
+      }
       // Page view box: [x0, y0, x1, y1] in PDF points.
       const view = pdfPage.view;
       const pdfWidthPts = view[2] - view[0];
@@ -219,7 +229,19 @@ export function PdfViewer({
         if (attempts++ < 40) requestAnimationFrame(place);
         return;
       }
-      const pdfPage = await doc.getPage(page);
+      let pdfPage: pdfjs.PDFPageProxy;
+      try {
+        pdfPage = await doc.getPage(page);
+      } catch {
+        // doc was destroyed between being captured above and this await
+        // resolving (a recompile can swap in a new PDF document mid-flight)
+        // — pdf.js throws from its internals rather than resolving to null.
+        // Retry through the same bounded loop: by the next frame,
+        // pdfDocRef.current should already point at the new, live document.
+        if (attempts++ < 40) requestAnimationFrame(place);
+        return;
+      }
+      if (cancelled) return;
       const view = pdfPage.view;
       const pdfWidthPts = view[2] - view[0];
       const pdfHeightPts = view[3] - view[1];
