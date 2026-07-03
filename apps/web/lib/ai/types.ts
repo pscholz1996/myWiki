@@ -186,6 +186,25 @@ export interface AuditedCitation {
   detail: string;
 }
 
+export interface AiPlanUsageWindow {
+  /** Percentage of the window used, 0-100. */
+  utilization: number;
+  /** ISO 8601 timestamp when the window resets, or null if unknown. */
+  resetsAt: string | null;
+}
+
+// A narrowed, stable shape for the Claude Agent SDK's experimental /usage
+// data (see lib/ai/agent.ts's getPlanUsage) — the SDK's own response type
+// is explicitly unstable ("EXPERIMENTAL_MAY_CHANGE"), so only the fields
+// this app actually displays are re-exposed here, insulating the rest of
+// the app from that shape shifting under us.
+export interface AiPlanUsage {
+  subscriptionType: string | null;
+  sessionCostUsd: number;
+  fiveHour: AiPlanUsageWindow | null;
+  sevenDay: AiPlanUsageWindow | null;
+}
+
 // Embedding a large PDF (hundreds of pages -> thousands of chunks) through a
 // CPU-bound local model is the dominant cost of an upload and can run tens
 // of seconds — long enough that a caller needs real incremental feedback,

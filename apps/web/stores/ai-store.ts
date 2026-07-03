@@ -6,6 +6,7 @@ import type {
   AiConversation,
   AiManifest,
   AiMessage,
+  AiPlanUsage,
   AiRejectedSourceFile,
   AiSourceRecord,
   AiUploadProgressEvent,
@@ -18,6 +19,7 @@ import {
   deleteAiSources,
   fetchAiConversation,
   fetchAiManifest,
+  fetchPlanUsage,
   streamAiChat,
   updateAiSourceMetadata,
   uploadAiSources,
@@ -34,9 +36,11 @@ interface AiState {
   chatLoading: boolean;
   uploadProgress: AiUploadProgressEvent | null;
   compactionNotice: AiCompactionNotice | null;
+  planUsage: AiPlanUsage | null;
   dismissCompactionNotice: () => void;
   loadSources: () => Promise<void>;
   loadConversation: () => Promise<void>;
+  loadPlanUsage: () => Promise<void>;
   uploadSources: (
     files: File[],
   ) => Promise<{ rejected: AiRejectedSourceFile[]; warnings: AiUploadWarning[] }>;
@@ -134,6 +138,7 @@ export const useAiStore = create<AiState>((set, get) => ({
   chatLoading: false,
   uploadProgress: null,
   compactionNotice: null,
+  planUsage: null,
 
   async loadSources() {
     const token = ++sourcesOpSeq;
@@ -168,6 +173,18 @@ export const useAiStore = create<AiState>((set, get) => ({
       });
     } finally {
       set({ loading: false });
+    }
+  },
+
+  // Best-effort: null (no live SDK session yet, e.g. before the first
+  // message of a server run) is a normal result, not an error, so failures
+  // here are swallowed rather than surfaced as a user-facing error toast.
+  async loadPlanUsage() {
+    try {
+      const planUsage = await fetchPlanUsage();
+      set({ planUsage });
+    } catch {
+      set({ planUsage: null });
     }
   },
 
@@ -297,7 +314,10 @@ export const useAiStore = create<AiState>((set, get) => ({
     set({ actionLoading: true, error: null });
     try {
       await clearAiConversation();
-      set({ activeConversation: null });
+      // The live SDK session is closed server-side along with the
+      // conversation file (see DELETE /api/ai/conversation) — usage data
+      // won't be available again until the next message starts a new one.
+      set({ activeConversation: null, planUsage: null });
     } catch (error) {
       set({
         error:
@@ -409,6 +429,11 @@ export const useAiStore = create<AiState>((set, get) => ({
           set({ error: event.message });
         }
       });
+
+      // The live SDK session only exists once a turn has actually run, so
+      // this is the earliest point plan usage becomes available — refresh
+      // it opportunistically rather than waiting for the next full mount.
+      void get().loadPlanUsage();
     } catch (error) {
       set({
         error:

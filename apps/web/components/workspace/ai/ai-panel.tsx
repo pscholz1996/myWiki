@@ -24,6 +24,7 @@ import {
 import { SiClaude } from "@icons-pack/react-simple-icons";
 import {
   DEFAULT_CONTEXT_WINDOW_TOKENS,
+  type AiPlanUsage,
   type AiSourceRecord,
   type AiUploadProgressEvent,
   type AuditedCitation,
@@ -68,6 +69,42 @@ function describeUploadProgress(
     case "indexing":
       return { label: "Writing index…", percent: 98 };
   }
+}
+
+// Plan-level rate-limit usage (5-hour/weekly), not this conversation's own
+// token count — only available once a live SDK session exists (after the
+// first message of a server run), so planUsage is null until then.
+function formatPlanUsage(planUsage: AiPlanUsage | null): {
+  label: string;
+  title?: string;
+} {
+  if (!planUsage) {
+    return { label: "Plan usage pending" };
+  }
+  if (!planUsage.fiveHour && !planUsage.sevenDay) {
+    return { label: "Plan limits not available for this account" };
+  }
+
+  const plan = planUsage.subscriptionType
+    ? `${planUsage.subscriptionType.charAt(0).toUpperCase()}${planUsage.subscriptionType.slice(1)} · `
+    : "";
+  const parts = [
+    planUsage.fiveHour ? `5h ${Math.round(planUsage.fiveHour.utilization)}%` : null,
+    planUsage.sevenDay ? `7d ${Math.round(planUsage.sevenDay.utilization)}%` : null,
+  ].filter((part): part is string => part !== null);
+
+  const resets = [
+    planUsage.fiveHour?.resetsAt
+      ? `5-hour window resets ${new Date(planUsage.fiveHour.resetsAt).toLocaleString()}`
+      : null,
+    planUsage.sevenDay?.resetsAt
+      ? `Weekly window resets ${new Date(planUsage.sevenDay.resetsAt).toLocaleString()}`
+      : null,
+  ]
+    .filter((part): part is string => part !== null)
+    .join(" · ");
+
+  return { label: `${plan}${parts.join(" · ")}`, title: resets || undefined };
 }
 
 type SourceSortMode = "recent" | "title" | "author" | "year";
@@ -160,6 +197,8 @@ export function AiPanel() {
   const uploadProgress = useAiStore((state) => state.uploadProgress);
   const loadSources = useAiStore((state) => state.loadSources);
   const loadConversation = useAiStore((state) => state.loadConversation);
+  const loadPlanUsage = useAiStore((state) => state.loadPlanUsage);
+  const planUsage = useAiStore((state) => state.planUsage);
   const uploadSources = useAiStore((state) => state.uploadSources);
   const removeSource = useAiStore((state) => state.removeSource);
   const removeSources = useAiStore((state) => state.removeSources);
@@ -190,8 +229,8 @@ export function AiPanel() {
   );
 
   useEffect(() => {
-    void Promise.all([loadSources(), loadConversation()]);
-  }, [loadConversation, loadSources]);
+    void Promise.all([loadSources(), loadConversation(), loadPlanUsage()]);
+  }, [loadConversation, loadPlanUsage, loadSources]);
 
   useEffect(() => {
     if (error) {
@@ -339,11 +378,9 @@ export function AiPanel() {
           </div>
         </div>
         <div className="flex flex-col items-end gap-0.5 text-muted-foreground text-xs">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2" title={formatPlanUsage(planUsage).title}>
             <BadgeInfoIcon className="size-3.5" />
-            {activeConversation?.usage
-              ? `${activeConversation.usage.inputTokens.toLocaleString()} in · ${activeConversation.usage.outputTokens.toLocaleString()} out`
-              : "Token usage pending"}
+            {formatPlanUsage(planUsage).label}
           </div>
           {activeConversation?.contextTokens ? (
             <div

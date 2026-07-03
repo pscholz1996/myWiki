@@ -3,6 +3,7 @@ import type {
   AiChatStreamEvent,
   AiConversation,
   AiManifest,
+  AiPlanUsage,
   AiRejectedSourceFile,
   AiSourceRecord,
   AiUploadProgressEvent,
@@ -205,6 +206,13 @@ export async function fetchCitationAudit(): Promise<AuditedCitation[]> {
     "/api/ai/citations/audit",
   );
   return data.citations;
+}
+
+// null before the first message of a server run (no live SDK session yet
+// to ask) — not an error, just "not available yet".
+export async function fetchPlanUsage(): Promise<AiPlanUsage | null> {
+  const data = await getJson<{ usage: AiPlanUsage | null }>("/api/ai/usage");
+  return data.usage;
 }
 
 export { errFrom, getJson };

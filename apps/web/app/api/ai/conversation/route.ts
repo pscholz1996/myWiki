@@ -3,6 +3,7 @@ import {
   deleteAiConversation,
   readAiConversation,
 } from "@/lib/ai/conversations";
+import { closeLiveSession } from "@/lib/ai/agent";
 import { getProjectDir, NoProjectSelectedError } from "@/lib/fs/project-dir";
 import { MAIN_CONVERSATION_ID } from "@/lib/ai/types";
 
@@ -39,6 +40,11 @@ export async function GET() {
 export async function DELETE() {
   try {
     const projectDir = getProjectDir();
+    // Must close the live SDK session together with deleting the conversation
+    // file — otherwise the next message would reuse an in-process session
+    // still tied to the just-deleted sdkSessionId instead of genuinely
+    // starting over.
+    closeLiveSession(projectDir);
     await deleteAiConversation(projectDir, MAIN_CONVERSATION_ID);
     return NextResponse.json({ ok: true });
   } catch (error) {

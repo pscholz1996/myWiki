@@ -5,6 +5,12 @@ import {
   query,
   tool,
 } from "@anthropic-ai/claude-agent-sdk";
+import type {
+  Query,
+  SDKControlGetUsageResponse,
+  SDKMessage,
+  SDKUserMessage,
+} from "@anthropic-ai/claude-agent-sdk";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import {
@@ -784,6 +790,232 @@ export function createOpenLatexMcpServer(
   });
 }
 
+// A pushable async-iterable "inbox": the persistent Query's prompt keeps
+// consuming from this across many turns, not just one — that's what keeps
+// the underlying Claude Agent SDK session (and its CLI subprocess) alive
+// between separate chat HTTP requests instead of spawning a fresh one per
+// message. Needed for anything that requires "streaming input mode" (the
+// experimental usage/rate-limit query below); a plain string prompt only
+// ever supports a single one-shot turn per process.
+class PushableQueue<T> implements AsyncIterable<T> {
+  private buffered: T[] = [];
+  private waiters: Array<(result: IteratorResult<T>) => void> = [];
+  private closed = false;
+
+  push(value: T): void {
+    const waiter = this.waiters.shift();
+    if (waiter) {
+      waiter({ value, done: false });
+    } else {
+      this.buffered.push(value);
+    }
+  }
+
+  close(): void {
+    this.closed = true;
+    for (const waiter of this.waiters) {
+      waiter({ value: undefined as never, done: true });
+    }
+    this.waiters = [];
+  }
+
+  [Symbol.asyncIterator](): AsyncIterator<T> {
+    return {
+      next: (): Promise<IteratorResult<T>> => {
+        if (this.buffered.length > 0) {
+          return Promise.resolve({ value: this.buffered.shift() as T, done: false });
+        }
+        if (this.closed) {
+          return Promise.resolve({ value: undefined as never, done: true });
+        }
+        return new Promise((resolve) => {
+          this.waiters.push(resolve);
+        });
+      },
+    };
+  }
+}
+
+// Buffers one chat turn's worth of messages so a caller can consume them
+// as an AsyncGenerator (matching the shape callers already expect) even
+// though they're really being dispatched from one long-lived background
+// pump shared across every turn — see LiveSession.pump().
+class TurnMessageStream {
+  private buffered: SDKMessage[] = [];
+  private waiter: ((result: IteratorResult<SDKMessage>) => void) | null = null;
+  private finished = false;
+
+  push(message: SDKMessage): void {
+    if (this.waiter) {
+      const waiter = this.waiter;
+      this.waiter = null;
+      waiter({ value: message, done: false });
+    } else {
+      this.buffered.push(message);
+    }
+  }
+
+  finish(): void {
+    this.finished = true;
+    if (this.waiter) {
+      const waiter = this.waiter;
+      this.waiter = null;
+      waiter({ value: undefined as never, done: true });
+    }
+  }
+
+  async *[Symbol.asyncIterator](): AsyncGenerator<SDKMessage> {
+    while (true) {
+      if (this.buffered.length > 0) {
+        yield this.buffered.shift() as SDKMessage;
+        continue;
+      }
+      if (this.finished) return;
+      const result = await new Promise<IteratorResult<SDKMessage>>((resolve) => {
+        this.waiter = resolve;
+      });
+      if (result.done) return;
+      yield result.value;
+    }
+  }
+}
+
+// One persistent Query per project, reused across every chat turn instead
+// of spawning a fresh CLI subprocess per message. A single background pump
+// (see .pump()) continuously reads the Query's own message stream and
+// hands each message to whichever turn is currently in flight; .busy
+// guards against a second turn starting before the first resolves (this
+// app is single-user/single-conversation-per-project, so turns are never
+// meant to overlap — a second one arriving mid-turn is a bug upstream, not
+// something to silently queue).
+class LiveSession {
+  private inbox = new PushableQueue<SDKUserMessage>();
+  private query: Query;
+  private currentTurn: TurnMessageStream | null = null;
+
+  constructor(options: {
+    cwd: string;
+    sourceIds: string[];
+    model: string;
+    isNewSession: boolean;
+    sdkSessionId: string;
+  }) {
+    // `sessionId` creates a session under a caller-chosen id and is only
+    // valid on the first turn; resuming an existing session must use
+    // `resume` instead (the SDK does not treat repeating `sessionId` as a
+    // resume — it conflicts with the already-persisted session and
+    // crashes the CLI process).
+    const sessionOptions = options.isNewSession
+      ? { sessionId: options.sdkSessionId }
+      : { resume: options.sdkSessionId };
+
+    this.query = query({
+      prompt: this.inbox,
+      options: {
+        cwd: options.cwd,
+        ...sessionOptions,
+        persistSession: true,
+        permissionMode: "bypassPermissions",
+        allowDangerouslySkipPermissions: true,
+        tools: [],
+        mcpServers: {
+          openlatex: createOpenLatexMcpServer(options.cwd, options.sourceIds),
+        },
+        includePartialMessages: true,
+        maxTurns: 8,
+        model: options.model,
+        // Long research conversations can exceed the context window. The
+        // SDK (the same engine behind Claude Code) already knows how to
+        // compact — summarize older turns and keep going — but that
+        // behavior lives behind a settings flag rather than being
+        // unconditionally on, so set it explicitly instead of relying on
+        // an ambient default we don't control from here.
+        settings: { autoCompactEnabled: true },
+      },
+    });
+
+    void this.pump();
+  }
+
+  private async pump(): Promise<void> {
+    for await (const message of this.query) {
+      this.currentTurn?.push(message);
+      if (message.type === "result") {
+        this.currentTurn?.finish();
+        this.currentTurn = null;
+      }
+    }
+  }
+
+  get busy(): boolean {
+    return this.currentTurn !== null;
+  }
+
+  // Re-scopes the session's knowledge-base tools to the currently-checked
+  // sources before each turn — with a fresh query() per turn (the old
+  // design) this happened implicitly every time; a persistent session
+  // needs the explicit dynamic-reconfigure call so changing which sources
+  // are checked still takes effect on the very next message.
+  async rescopeSources(cwd: string, sourceIds: string[]): Promise<void> {
+    await this.query.setMcpServers({
+      openlatex: createOpenLatexMcpServer(cwd, sourceIds),
+    });
+  }
+
+  async *runTurn(userMessage: SDKUserMessage): AsyncGenerator<SDKMessage> {
+    if (this.currentTurn) {
+      throw new Error(
+        "A message is already being processed for this conversation.",
+      );
+    }
+    const stream = new TurnMessageStream();
+    this.currentTurn = stream;
+    this.inbox.push(userMessage);
+    yield* stream;
+  }
+
+  async usage(): Promise<SDKControlGetUsageResponse> {
+    return this.query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET();
+  }
+
+  close(): void {
+    this.inbox.close();
+    this.query.close();
+  }
+}
+
+// Keyed on globalThis (not a plain module-level Map) so Next.js dev-mode
+// hot-reloading of this module doesn't orphan a live session's underlying
+// CLI subprocess — reloading would otherwise silently drop the only
+// reference to it without ever calling .close().
+const globalForSessions = globalThis as unknown as {
+  __openlatexLiveSessions?: Map<string, LiveSession>;
+};
+const liveSessions =
+  globalForSessions.__openlatexLiveSessions ?? new Map<string, LiveSession>();
+globalForSessions.__openlatexLiveSessions = liveSessions;
+
+export function closeLiveSession(projectDir: string): void {
+  liveSessions.get(projectDir)?.close();
+  liveSessions.delete(projectDir);
+}
+
+export async function getPlanUsage(
+  projectDir: string,
+): Promise<SDKControlGetUsageResponse | null> {
+  const session = liveSessions.get(projectDir);
+  if (!session) return null;
+  try {
+    return await session.usage();
+  } catch {
+    // The experimental control API can fail transiently (e.g. right after
+    // a turn finishes, before the transport settles) — treat that the same
+    // as "not available yet" rather than surfacing an error for what's
+    // meant to be a best-effort display.
+    return null;
+  }
+}
+
 export async function* runOpenLatexChatTurn(
   projectDir: string,
   conversation: AiConversation,
@@ -791,43 +1023,28 @@ export async function* runOpenLatexChatTurn(
   isNewSession: boolean,
 ) {
   const prompt = await serializePrompt(projectDir, conversation, request);
-  const sessionId = conversation.sdkSessionId ?? conversation.id;
+  const sdkSessionId = conversation.sdkSessionId ?? conversation.id;
+  const model = request.model ?? conversation.model ?? "claude-sonnet-5";
 
-  // `sessionId` creates a session under a caller-chosen id and is only valid
-  // on the first turn; resuming an existing session must use `resume`
-  // instead (the SDK does not treat repeating `sessionId` as a resume — it
-  // conflicts with the already-persisted session and crashes the CLI
-  // process on turn 2+).
-  const sessionOptions = isNewSession
-    ? { sessionId }
-    : { resume: sessionId };
-
-  const q = query({
-    prompt,
-    options: {
+  let session = liveSessions.get(projectDir);
+  if (!session) {
+    session = new LiveSession({
       cwd: projectDir,
-      ...sessionOptions,
-      persistSession: true,
-      permissionMode: "bypassPermissions",
-      allowDangerouslySkipPermissions: true,
-      tools: [],
-      mcpServers: {
-        openlatex: createOpenLatexMcpServer(projectDir, conversation.sourceIds),
-      },
-      includePartialMessages: true,
-      maxTurns: 8,
-      model: request.model ?? conversation.model ?? "claude-sonnet-5",
-      // Long research conversations can exceed the context window. The SDK
-      // (the same engine behind Claude Code) already knows how to compact
-      // — summarize older turns and keep going — but that behavior lives
-      // behind a settings flag rather than being unconditionally on, so
-      // set it explicitly instead of relying on an ambient default we
-      // don't control from here.
-      settings: { autoCompactEnabled: true },
-    },
-  });
-
-  for await (const message of q) {
-    yield message;
+      sourceIds: conversation.sourceIds,
+      model,
+      isNewSession,
+      sdkSessionId,
+    });
+    liveSessions.set(projectDir, session);
+  } else {
+    await session.rescopeSources(projectDir, conversation.sourceIds);
   }
+
+  const userMessage: SDKUserMessage = {
+    type: "user",
+    message: { role: "user", content: prompt },
+    parent_tool_use_id: null,
+  };
+
+  yield* session.runTurn(userMessage);
 }
