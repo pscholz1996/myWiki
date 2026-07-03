@@ -77,14 +77,32 @@ export interface AiSourceMetadata {
   title?: string;
   authors?: string[];
   year?: string;
+  /** Only ever set when provenance is "crossref" — a real, independently checkable identifier for the matched record. */
+  doi?: string;
   /**
-   * "pdf-metadata" means every field here came from the PDF's own embedded
-   * metadata dictionary — trustworthy enough to auto-fill a BibTeX entry.
-   * "heuristic" means it's a rough guess (currently: title only, from the
-   * first ~150 characters of page 1) — good for a human to skim in a
-   * source list, never trustworthy enough to silently feed into a citation.
+   * "manual" means a human directly typed/confirmed these values in the
+   * source detail panel — the single most trustworthy tier there is, safe
+   * to auto-fill into a citation. "crossref" means the title/authors/year
+   * were confirmed against a real CrossRef bibliographic record (a
+   * publisher-submitted database entry, not an extraction) — also safe to
+   * auto-fill. "pdf-metadata" means they came from the PDF's own embedded
+   * metadata dictionary — also trustworthy. "heuristic" means it's a rough
+   * guess from the page's own text/layout — good for a human to skim,
+   * never trustworthy enough to silently feed into a citation.
    */
-  provenance: "pdf-metadata" | "heuristic";
+  provenance: "manual" | "crossref" | "pdf-metadata" | "heuristic";
+  /**
+   * True when `title` specifically came from a heuristic guess even though
+   * the rest of this object is "pdf-metadata" or "crossref" provenance.
+   * Common case: a PDF built from LaTeX that never set
+   * \hypersetup{pdftitle=...} has a genuinely blank Title field but a
+   * perfectly real CreationDate — good for a human skimming the source
+   * list, never safe to auto-fill into a citation the way a verified title
+   * is.
+   */
+  titleIsHeuristic?: boolean;
+  /** Same idea as titleIsHeuristic, for `authors` specifically. */
+  authorsAreHeuristic?: boolean;
 }
 
 export interface AiSourceRecord {
@@ -136,6 +154,22 @@ export interface AiRejectedSourceFile {
 export interface AiUploadResult extends AiManifest {
   rejected: AiRejectedSourceFile[];
 }
+
+// Embedding a large PDF (hundreds of pages -> thousands of chunks) through a
+// CPU-bound local model is the dominant cost of an upload and can run tens
+// of seconds — long enough that a caller needs real incremental feedback,
+// not just a spinner, to tell "still working" apart from "stuck." Emitted
+// at natural checkpoints: once per source as it's saved/extracted, then
+// repeatedly during embedding (its own batches are the only sub-second-
+// granularity checkpoint available).
+export type AiUploadProgressEvent =
+  | { stage: "saving"; fileName: string; fileIndex: number; fileCount: number }
+  | { stage: "extracting"; fileName: string; fileIndex: number; fileCount: number }
+  | { stage: "verifying"; fileName: string; fileIndex: number; fileCount: number }
+  | { stage: "embedding"; chunksDone: number; chunksTotal: number }
+  | { stage: "indexing" };
+
+export type AiUploadProgressCallback = (event: AiUploadProgressEvent) => void;
 
 export interface AiChatRequest {
   conversationId?: string;

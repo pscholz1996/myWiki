@@ -98,7 +98,7 @@ async function serializePrompt(
     "- Prefer concise answers with explicit citations and page numbers.",
     "- If a quote cannot be verified, say so and keep searching instead of guessing.",
     "- A citation you made earlier in THIS conversation is not automatically still valid. Sources can be deleted mid-conversation. Before restating, confirming, repeating, or relying on any earlier citation — even one you already verified — you MUST call cite() again in this turn. Never describe something as \"verified\" unless cite() succeeded in this exact turn.",
-    "- When you're adding a source-backed sentence into the .tex text itself (not just discussing it in chat), a chat citation chip isn't enough: after cite() succeeds, call ensure_bibtex_entry to get a real cite key, then insert \\cite{key} at that spot with replace_in_project_file.",
+    "- When you're adding a source-backed sentence into the .tex text itself (not just discussing it in chat), a chat citation chip isn't enough: after cite() succeeds, get a cite key (the cite() result's source.bibKey if it's already set, otherwise call ensure_bibtex_entry) and insert \\cite[p.~<page>]{key} — e.g. \\cite[p.~12]{key} — at that spot with replace_in_project_file, using the EXACT page number cite() just verified. Never insert a bare \\cite{key} with no page for a page-specific claim, and never write a page number you did not just verify with cite() in this turn — if a paragraph draws on several pages of the same source, verify and cite each page-specific claim separately rather than picking one page to stand in for all of them.",
     "- Search results and browse_knowledge_base may include research notes you saved in earlier turns (kind \"note\") alongside primary sources. A note is useful context — your own prior synthesis — but never a substitute for a fresh cite() against the primary source it's based on; cite() will refuse to verify a quote against a note even if the text matches. When you've built a genuinely new synthesis worth keeping (e.g. after a broad multi-source search on a substantive question), save it with save_research_note so future turns don't have to redo that search from scratch.",
     staleSourceIds.length > 0
       ? `- The following source IDs were cited earlier in this conversation but have since been permanently REMOVED from the knowledge base: ${staleSourceIds.join(", ")}. Do not restate, confirm, or rely on anything from them. If asked, say the source was removed from the knowledge base and that information can no longer be verified.`
@@ -395,17 +395,35 @@ export async function ensureBibtexEntry(
     );
   }
 
-  // Fields the model omits get defaulted from the source's own PDF metadata
-  // — but only when it's provenance "pdf-metadata" (read straight from the
-  // PDF's metadata dictionary), never a "heuristic" guess. A heuristic title
-  // is good enough for a human skimming a source list; it's not verified
-  // enough to silently become part of a citation.
+  // Fields the model omits get defaulted from the source's own metadata —
+  // but only when it's provenance "manual" (a human directly confirmed it
+  // in the source detail panel), "crossref" (confirmed against a real
+  // CrossRef bibliographic record), or "pdf-metadata" (read straight from
+  // the PDF's metadata dictionary), never a "heuristic" guess. Even within
+  // those trusted provenances, a specific field can still be a heuristic
+  // backfill (e.g. real pdf-metadata year but a layout-guessed
+  // title/authors) — titleIsHeuristic/authorsAreHeuristic are checked per
+  // field for exactly that reason. A heuristic value is good enough for a
+  // human skimming a source list; it's not verified enough to silently
+  // become part of a citation.
   const fields = { ...args.fields };
-  if (source.metadata?.provenance === "pdf-metadata") {
-    if (!fields.title?.trim() && source.metadata.title) {
+  if (
+    source.metadata?.provenance === "manual" ||
+    source.metadata?.provenance === "crossref" ||
+    source.metadata?.provenance === "pdf-metadata"
+  ) {
+    if (
+      !fields.title?.trim() &&
+      source.metadata.title &&
+      !source.metadata.titleIsHeuristic
+    ) {
       fields.title = source.metadata.title;
     }
-    if (!fields.author?.trim() && source.metadata.authors?.length) {
+    if (
+      !fields.author?.trim() &&
+      source.metadata.authors?.length &&
+      !source.metadata.authorsAreHeuristic
+    ) {
       fields.author = source.metadata.authors.join(" and ");
     }
     if (!fields.year?.trim() && source.metadata.year) {
@@ -561,7 +579,7 @@ export function createOpenLatexMcpServer(
       ),
       tool(
         "cite",
-        "Verify that an exact quote appears on the requested source page.",
+        "Verify that an exact quote appears on the requested source page. When inserting this into .tex text (not just chat), the result's page — and source.bibKey if already set — is what you cite with \\cite[p.~<page>]{key}; see ensure_bibtex_entry.",
         {
           sourceId: z.string(),
           page: z.number().int().min(1),
@@ -588,7 +606,7 @@ export function createOpenLatexMcpServer(
       ),
       tool(
         "ensure_bibtex_entry",
-        "Find or create a BibTeX entry in the project's .bib file for a knowledge-base source, and link them so repeated calls for the same source are idempotent. Returns the cite key — insert \\cite{key} into the .tex text yourself with replace_in_project_file. Only pass fields you can actually support from the source's own text (e.g. its title page); this is bibliographic bookkeeping, not a place to invent author/year details. Fields you omit may be auto-filled from the PDF's own embedded metadata when available — you don't need to guess a field just to fill it in.",
+        "Find or create a BibTeX entry in the project's .bib file for a knowledge-base source, and link them so repeated calls for the same source are idempotent. Returns the cite key — insert \\cite[p.~<page>]{key} into the .tex text yourself with replace_in_project_file, using the exact page number you verified with cite() for the claim it's attached to (never a bare \\cite{key} with no page). Only pass fields you can actually support from the source's own text (e.g. its title page); this is bibliographic bookkeeping, not a place to invent author/year details. Fields you omit may be auto-filled from the PDF's own embedded metadata when available — you don't need to guess a field just to fill it in.",
         {
           source_id: z.string(),
           bib_file: z

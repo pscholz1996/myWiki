@@ -10,6 +10,7 @@ const CONTENT_TYPES: Record<string, string> = {
   pdf: "application/pdf",
   markdown: "text/markdown",
   text: "text/plain",
+  note: "text/markdown",
 };
 
 export async function GET(

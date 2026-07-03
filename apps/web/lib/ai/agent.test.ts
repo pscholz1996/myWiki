@@ -232,6 +232,51 @@ describe("ensureBibtexEntry — PDF-metadata pre-fill", () => {
     fs.rmSync(projectDir, { recursive: true, force: true });
   });
 
+  // Mixed case: a PDF's own metadata dictionary had a real author/year but a
+  // genuinely blank title, so the title got backfilled heuristically while
+  // provenance stays "pdf-metadata" for the fields that really are. Only
+  // the heuristic title must be excluded — the real author/year still
+  // pre-fill normally.
+  test("pre-fills real pdf-metadata fields but never a heuristic-backfilled title", async () => {
+    const source: AiSourceRecord = {
+      id: "src-3",
+      originalName: "blank-title.txt",
+      storedName: "src-3.txt",
+      relativePath: ".openlatex/ai/sources/src-3.txt",
+      kind: "text",
+      bytes: 0,
+      ingestedAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      metadata: {
+        title: "Findings on quantum entanglement and non…",
+        titleIsHeuristic: true,
+        authors: ["Ada Lovelace"],
+        year: "2023",
+        provenance: "pdf-metadata",
+      },
+    };
+    const projectDir = setupProjectWithSource(
+      source,
+      "Findings on quantum entanglement and nonlocal correlations.",
+    );
+
+    const result = await ensureBibtexEntry(projectDir, {
+      sourceId: source.id,
+      bibFile: "references.bib",
+      entryType: "article",
+      key: "lovelace2023blank",
+      fields: {},
+    });
+    expect(result.isError).toBeFalsy();
+
+    const bibContent = fs.readFileSync(path.join(projectDir, "references.bib"), "utf8");
+    expect(bibContent).not.toContain("title =");
+    expect(bibContent).toContain("author = {Ada Lovelace}");
+    expect(bibContent).toContain("year = {2023}");
+
+    fs.rmSync(projectDir, { recursive: true, force: true });
+  });
+
   test("refuses to turn a research note into a BibTeX entry", async () => {
     const note: AiSourceRecord = {
       id: "note-1",
@@ -256,6 +301,139 @@ describe("ensureBibtexEntry — PDF-metadata pre-fill", () => {
 
     const bibContent = fs.readFileSync(path.join(projectDir, "references.bib"), "utf8");
     expect(bibContent).toBe("");
+
+    fs.rmSync(projectDir, { recursive: true, force: true });
+  });
+
+  // Mirrors the titleIsHeuristic case above, but for authors: a source can
+  // have a real pdf-metadata title/year with authors that were only ever a
+  // layout-heuristic guess (e.g. the PDF's own Author field was blank, so
+  // extractSourceText backfilled authors from the page-1 byline instead) —
+  // that guess must never silently become a BibTeX author list.
+  test("never pre-fills authorsAreHeuristic-flagged authors, even under pdf-metadata provenance", async () => {
+    const source: AiSourceRecord = {
+      id: "src-4",
+      originalName: "guessed-authors.txt",
+      storedName: "src-4.txt",
+      relativePath: ".openlatex/ai/sources/src-4.txt",
+      kind: "text",
+      bytes: 0,
+      ingestedAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      metadata: {
+        title: "A Real PDF-Metadata Title",
+        authors: ["Guessed Name"],
+        authorsAreHeuristic: true,
+        year: "2023",
+        provenance: "pdf-metadata",
+      },
+    };
+    const projectDir = setupProjectWithSource(
+      source,
+      "A Real PDF-Metadata Title, some text.",
+    );
+
+    const result = await ensureBibtexEntry(projectDir, {
+      sourceId: source.id,
+      bibFile: "references.bib",
+      entryType: "article",
+      key: "guessed2023",
+      fields: {},
+    });
+    expect(result.isError).toBeFalsy();
+
+    const bibContent = fs.readFileSync(path.join(projectDir, "references.bib"), "utf8");
+    expect(bibContent).toContain("title = {A Real PDF-Metadata Title}");
+    expect(bibContent).not.toContain("author =");
+    expect(bibContent).toContain("year = {2023}");
+
+    fs.rmSync(projectDir, { recursive: true, force: true });
+  });
+
+  // "crossref" provenance (a title/authors/year confirmed against a real
+  // CrossRef bibliographic record) is just as trustworthy as pdf-metadata —
+  // it should pre-fill exactly the same way.
+  test("pre-fills fields from crossref provenance the same as pdf-metadata", async () => {
+    const source: AiSourceRecord = {
+      id: "src-5",
+      originalName: "verified.txt",
+      storedName: "src-5.txt",
+      relativePath: ".openlatex/ai/sources/src-5.txt",
+      kind: "text",
+      bytes: 0,
+      ingestedAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      metadata: {
+        title: "A CrossRef-Verified Title",
+        authors: ["Marie Curie"],
+        year: "1903",
+        doi: "10.1234/example.doi",
+        provenance: "crossref",
+      },
+    };
+    const projectDir = setupProjectWithSource(
+      source,
+      "A CrossRef-Verified Title, some text.",
+    );
+
+    const result = await ensureBibtexEntry(projectDir, {
+      sourceId: source.id,
+      bibFile: "references.bib",
+      entryType: "article",
+      key: "curie1903",
+      fields: {},
+    });
+    expect(result.isError).toBeFalsy();
+
+    const bibContent = fs.readFileSync(path.join(projectDir, "references.bib"), "utf8");
+    expect(bibContent).toContain("title = {A CrossRef-Verified Title}");
+    expect(bibContent).toContain("author = {Marie Curie}");
+    expect(bibContent).toContain("year = {1903}");
+
+    fs.rmSync(projectDir, { recursive: true, force: true });
+  });
+
+  // A human directly editing a source's metadata in the detail panel is the
+  // single most trustworthy signal this system gets — it should pre-fill
+  // exactly like pdf-metadata/crossref, even though the value was never
+  // extracted from anything.
+  test("pre-fills fields from manual provenance the same as pdf-metadata/crossref", async () => {
+    const source: AiSourceRecord = {
+      id: "src-6",
+      originalName: "manually-fixed.txt",
+      storedName: "src-6.txt",
+      relativePath: ".openlatex/ai/sources/src-6.txt",
+      kind: "text",
+      bytes: 0,
+      ingestedAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      metadata: {
+        title: "A Manually Corrected Title",
+        authors: ["Grace Hopper"],
+        year: "1959",
+        provenance: "manual",
+        titleIsHeuristic: false,
+        authorsAreHeuristic: false,
+      },
+    };
+    const projectDir = setupProjectWithSource(
+      source,
+      "A Manually Corrected Title, some text.",
+    );
+
+    const result = await ensureBibtexEntry(projectDir, {
+      sourceId: source.id,
+      bibFile: "references.bib",
+      entryType: "article",
+      key: "hopper1959",
+      fields: {},
+    });
+    expect(result.isError).toBeFalsy();
+
+    const bibContent = fs.readFileSync(path.join(projectDir, "references.bib"), "utf8");
+    expect(bibContent).toContain("title = {A Manually Corrected Title}");
+    expect(bibContent).toContain("author = {Grace Hopper}");
+    expect(bibContent).toContain("year = {1959}");
 
     fs.rmSync(projectDir, { recursive: true, force: true });
   });

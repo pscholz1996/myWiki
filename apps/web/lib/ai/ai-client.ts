@@ -5,6 +5,8 @@ import type {
   AiConversationSummary,
   AiManifest,
   AiRejectedSourceFile,
+  AiSourceRecord,
+  AiUploadProgressEvent,
   AiUploadResult,
 } from "@/lib/ai/types";
 
@@ -25,11 +27,57 @@ async function getJson<T>(url: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+// Shared line-buffering for text/event-stream responses — splits on the
+// blank-line event separator and hands each event's raw "event:"/"data:"
+// lines to the caller. Deliberately doesn't parse the data as JSON itself:
+// streamAiChat and uploadAiSources want different fallback behavior on a
+// malformed event (a different error-event shape each), so that stays with
+// the caller instead of being forced into one shared shape here.
+async function readSseEvents(
+  res: Response,
+  onEvent: (type: string, dataText: string) => void,
+): Promise<void> {
+  if (!res.body) return;
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+
+    while (true) {
+      const separator = buffer.indexOf("\n\n");
+      if (separator === -1) break;
+
+      const rawEvent = buffer.slice(0, separator).trim();
+      buffer = buffer.slice(separator + 2);
+
+      if (!rawEvent) continue;
+
+      const lines = rawEvent.split("\n");
+      const eventLine = lines.find((line) => line.startsWith("event:"));
+      const dataLines = lines
+        .filter((line) => line.startsWith("data:"))
+        .map((line) => line.slice(5).trimStart());
+
+      if (!eventLine) continue;
+      onEvent(eventLine.slice(6).trim(), dataLines.join("\n"));
+    }
+  }
+}
+
 export async function fetchAiManifest(): Promise<AiManifest> {
   return getJson<AiManifest>("/api/ai/sources");
 }
 
-export async function uploadAiSources(files: File[]): Promise<AiUploadResult> {
+export async function uploadAiSources(
+  files: File[],
+  onProgress?: (event: AiUploadProgressEvent) => void,
+): Promise<AiUploadResult> {
   const formData = new FormData();
   for (const file of files) {
     formData.append("files", file);
@@ -41,7 +89,40 @@ export async function uploadAiSources(files: File[]): Promise<AiUploadResult> {
   });
 
   if (!res.ok) throw await errFrom(res);
-  return res.json() as Promise<AiUploadResult>;
+
+  let result: AiUploadResult | null = null;
+  let errorMessage: string | null = null;
+
+  await readSseEvents(res, (type, dataText) => {
+    let data: unknown;
+    try {
+      data = dataText ? JSON.parse(dataText) : undefined;
+    } catch {
+      errorMessage = "Failed to parse upload progress";
+      return;
+    }
+
+    if (type === "progress") {
+      onProgress?.(data as AiUploadProgressEvent);
+    } else if (type === "done") {
+      result = data as AiUploadResult;
+    } else if (type === "error") {
+      const errData = data as {
+        error?: string;
+        rejected?: AiRejectedSourceFile[];
+      };
+      const reasons = errData.rejected
+        ?.map((r) => `${r.name}: ${r.reason}`)
+        .join("; ");
+      errorMessage = reasons
+        ? `${errData.error ?? "Upload failed"} (${reasons})`
+        : (errData.error ?? "Upload failed");
+    }
+  });
+
+  if (errorMessage) throw new Error(errorMessage);
+  if (!result) throw new Error("Upload ended without a result");
+  return result;
 }
 
 export async function deleteAiSource(sourceId: string): Promise<AiManifest> {
@@ -51,6 +132,20 @@ export async function deleteAiSource(sourceId: string): Promise<AiManifest> {
 
   if (!res.ok) throw await errFrom(res);
   return res.json() as Promise<AiManifest>;
+}
+
+export async function updateAiSourceMetadata(
+  sourceId: string,
+  updates: { title: string; authors: string[]; year: string },
+): Promise<AiSourceRecord> {
+  const res = await fetch(`/api/ai/sources/${sourceId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(updates),
+  });
+
+  if (!res.ok) throw await errFrom(res);
+  return res.json() as Promise<AiSourceRecord>;
 }
 
 export async function fetchAiConversations(): Promise<AiConversationSummary[]> {
@@ -92,52 +187,22 @@ export async function streamAiChat(
   });
 
   if (!res.ok) throw await errFrom(res);
-  if (!res.body) return;
 
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-
-    buffer += decoder.decode(value, { stream: true });
-
-    while (true) {
-      const separator = buffer.indexOf("\n\n");
-      if (separator === -1) break;
-
-      const rawEvent = buffer.slice(0, separator).trim();
-      buffer = buffer.slice(separator + 2);
-
-      if (!rawEvent) continue;
-
-      const lines = rawEvent.split("\n");
-      const eventLine = lines.find((line) => line.startsWith("event:"));
-      const dataLines = lines
-        .filter((line) => line.startsWith("data:"))
-        .map((line) => line.slice(5).trimStart());
-
-      if (!eventLine) continue;
-      const type = eventLine.slice(6).trim();
-      const dataText = dataLines.join("\n");
-
-      try {
-        onEvent({
-          type: type as AiChatStreamEvent["type"] | string,
-          conversationId: request.conversationId ?? "",
-          data: dataText ? JSON.parse(dataText) : undefined,
-        } as AiChatStreamEvent);
-      } catch {
-        onEvent({
-          type: "error",
-          conversationId: request.conversationId ?? "",
-          message: dataText || "Failed to parse chat event",
-        });
-      }
+  await readSseEvents(res, (type, dataText) => {
+    try {
+      onEvent({
+        type: type as AiChatStreamEvent["type"] | string,
+        conversationId: request.conversationId ?? "",
+        data: dataText ? JSON.parse(dataText) : undefined,
+      } as AiChatStreamEvent);
+    } catch {
+      onEvent({
+        type: "error",
+        conversationId: request.conversationId ?? "",
+        message: dataText || "Failed to parse chat event",
+      });
     }
-  }
+  });
 }
 
 export { errFrom, getJson };

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -15,7 +15,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { useAiStore } from "@/stores/ai-store";
 import {
   BadgeInfoIcon,
-  FileTextIcon,
   FolderPlusIcon,
   Loader2Icon,
   MessageSquarePlusIcon,
@@ -26,13 +25,105 @@ import {
   ShieldCheckIcon,
 } from "lucide-react";
 import { SiClaude } from "@icons-pack/react-simple-icons";
-import { DEFAULT_CONTEXT_WINDOW_TOKENS, type AiConversation } from "@/lib/ai/types";
+import {
+  DEFAULT_CONTEXT_WINDOW_TOKENS,
+  type AiConversation,
+  type AiSourceRecord,
+  type AiUploadProgressEvent,
+} from "@/lib/ai/types";
 import { toast } from "sonner";
 import { AiMarkdown } from "./markdown";
+import { SourceListItem } from "./source-list-item";
+
+// Embedding is the dominant, least predictable cost for a large source, so
+// it gets the bulk of the bar (20-95%) with real per-batch granularity;
+// saving/extracting/verifying and the final index write are comparatively
+// fast and only ever have coarse (per-file, or no) granularity to report.
+function describeUploadProgress(
+  event: AiUploadProgressEvent,
+): { label: string; percent: number } {
+  switch (event.stage) {
+    case "saving":
+      return {
+        label: `Saving ${event.fileName} (${event.fileIndex + 1}/${event.fileCount})…`,
+        percent: (event.fileIndex / Math.max(event.fileCount, 1)) * 10,
+      };
+    case "extracting":
+      return {
+        label: `Extracting text from ${event.fileName} (${event.fileIndex + 1}/${event.fileCount})…`,
+        percent: (event.fileIndex / Math.max(event.fileCount, 1)) * 10,
+      };
+    case "verifying":
+      return {
+        label: `Looking up ${event.fileName} in CrossRef (${event.fileIndex + 1}/${event.fileCount})…`,
+        percent: 10 + (event.fileIndex / Math.max(event.fileCount, 1)) * 10,
+      };
+    case "embedding":
+      return {
+        label: `Embedding chunks (${event.chunksDone}/${event.chunksTotal})…`,
+        percent:
+          20 +
+          (event.chunksTotal > 0 ? event.chunksDone / event.chunksTotal : 1) * 75,
+      };
+    case "indexing":
+      return { label: "Writing index…", percent: 98 };
+  }
+}
+
+type SourceSortMode = "recent" | "title" | "author" | "year";
+
+function matchesSourceQuery(source: AiSourceRecord, query: string): boolean {
+  if (!query) return true;
+  const haystack = [
+    source.metadata?.title,
+    source.originalName,
+    source.metadata?.authors?.join(" "),
+    source.metadata?.year,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  return haystack.includes(query);
+}
+
+// Missing values always sink to the end regardless of sort direction —
+// otherwise an empty title/author/year would sort first (as "" precedes
+// any real string/number) and clutter the top of an alphabetical list.
+function sortSources(list: AiSourceRecord[], mode: SourceSortMode): AiSourceRecord[] {
+  const copy = [...list];
+  switch (mode) {
+    case "title":
+      return copy.sort((a, b) =>
+        (a.metadata?.title ?? a.originalName).localeCompare(
+          b.metadata?.title ?? b.originalName,
+        ),
+      );
+    case "author": {
+      const authorOf = (s: AiSourceRecord) => s.metadata?.authors?.[0];
+      return copy.sort((a, b) => {
+        const authorA = authorOf(a);
+        const authorB = authorOf(b);
+        if (!authorA && !authorB) return 0;
+        if (!authorA) return 1;
+        if (!authorB) return -1;
+        return authorA.localeCompare(authorB);
+      });
+    }
+    case "year": {
+      const yearOf = (s: AiSourceRecord) => Number(s.metadata?.year) || -Infinity;
+      return copy.sort((a, b) => yearOf(b) - yearOf(a));
+    }
+    case "recent":
+    default:
+      return copy.sort((a, b) => b.ingestedAt.localeCompare(a.ingestedAt));
+  }
+}
 
 export function AiPanel() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [draft, setDraft] = useState("");
+  const [sourceQuery, setSourceQuery] = useState("");
+  const [sourceSort, setSourceSort] = useState<SourceSortMode>("recent");
 
   const manifest = useAiStore((state) => state.manifest);
   const sources = useAiStore((state) => state.sources);
@@ -47,10 +138,12 @@ export function AiPanel() {
   const error = useAiStore((state) => state.error);
   const actionLoading = useAiStore((state) => state.actionLoading);
   const chatLoading = useAiStore((state) => state.chatLoading);
+  const uploadProgress = useAiStore((state) => state.uploadProgress);
   const loadSources = useAiStore((state) => state.loadSources);
   const loadConversations = useAiStore((state) => state.loadConversations);
   const uploadSources = useAiStore((state) => state.uploadSources);
   const removeSource = useAiStore((state) => state.removeSource);
+  const editSourceMetadata = useAiStore((state) => state.editSourceMetadata);
   const createConversation = useAiStore((state) => state.createConversation);
   const selectConversation = useAiStore((state) => state.selectConversation);
   const removeConversation = useAiStore((state) => state.removeConversation);
@@ -63,6 +156,13 @@ export function AiPanel() {
   );
 
   const selectedSourceIds = activeConversation?.sourceIds ?? currentSourceIds;
+
+  const visibleSources = sortSources(
+    sources.filter((source) =>
+      matchesSourceQuery(source, sourceQuery.trim().toLowerCase()),
+    ),
+    sourceSort,
+  );
 
   const sourceNameById = new Map(
     sources.map((source) => [source.id, source.originalName]),
@@ -322,6 +422,25 @@ export function AiPanel() {
             </Button>
           </div>
 
+          {uploadProgress ? (
+            <div className="space-y-1.5 rounded-md border bg-muted/40 px-3 py-2">
+              <div className="flex items-center gap-2 text-xs">
+                <Loader2Icon className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
+                <span className="truncate">
+                  {describeUploadProgress(uploadProgress).label}
+                </span>
+              </div>
+              <div className="h-1.5 overflow-hidden rounded-full bg-border">
+                <div
+                  className="h-full rounded-full bg-primary transition-[width] duration-300 ease-out"
+                  style={{
+                    width: `${describeUploadProgress(uploadProgress).percent}%`,
+                  }}
+                />
+              </div>
+            </div>
+          ) : null}
+
           {sources.length > 0 ? (
             <div className="text-muted-foreground text-xs">
               {selectedSourceIds.length === 0
@@ -330,52 +449,58 @@ export function AiPanel() {
             </div>
           ) : null}
 
+          {sources.length > 0 ? (
+            <div className="flex items-center gap-1.5">
+              <div className="relative flex-1">
+                <SearchIcon className="-translate-y-1/2 absolute top-1/2 left-2 size-3.5 text-muted-foreground" />
+                <Input
+                  value={sourceQuery}
+                  onChange={(event) => setSourceQuery(event.target.value)}
+                  placeholder="Search sources…"
+                  className="h-8 pl-7 text-xs"
+                />
+              </div>
+              <Select
+                value={sourceSort}
+                onValueChange={(value) => setSourceSort(value as SourceSortMode)}
+              >
+                <SelectTrigger size="sm" className="w-[132px] text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="recent">Recently added</SelectItem>
+                  <SelectItem value="title">Title (A–Z)</SelectItem>
+                  <SelectItem value="author">Author (A–Z)</SelectItem>
+                  <SelectItem value="year">Year (newest)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          ) : null}
+
           <div className="max-h-52 space-y-2 overflow-y-auto pr-1">
             {sources.length === 0 ? (
               <div className="rounded-md border border-dashed px-3 py-4 text-center text-muted-foreground text-xs">
                 Add a source to start building the knowledge base.
               </div>
+            ) : visibleSources.length === 0 ? (
+              <div className="rounded-md border border-dashed px-3 py-4 text-center text-muted-foreground text-xs">
+                No sources match &quot;{sourceQuery}&quot;.
+              </div>
             ) : (
-              sources.map((source) => (
-                <div
+              visibleSources.map((source) => (
+                <SourceListItem
                   key={source.id}
-                  className="flex items-start justify-between gap-3 rounded-md border bg-background px-3 py-2"
-                >
-                  <div className="flex min-w-0 flex-1 items-start gap-2">
-                    <Checkbox
-                      className="mt-0.5"
-                      checked={selectedSourceIds.includes(source.id)}
-                      onCheckedChange={() => toggleSourceSelection(source.id)}
-                      aria-label={`Scope chat to ${source.originalName}`}
-                    />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <FileTextIcon className="size-3.5 text-muted-foreground" />
-                        <div className="truncate font-medium text-sm">
-                          {source.originalName}
-                        </div>
-                      </div>
-                      <div className="mt-1 text-muted-foreground text-xs">
-                        {source.kind.toUpperCase()} ·{" "}
-                        {Math.round(source.bytes / 1024)} KB
-                        {typeof source.pageCount === "number"
-                          ? ` · ${source.pageCount} pages`
-                          : ""}
-                      </div>
-                    </div>
-                  </div>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-8 px-2 text-muted-foreground"
-                    onClick={() =>
-                      void handleDeleteSource(source.id, source.originalName)
-                    }
-                    disabled={actionLoading}
-                  >
-                    <Trash2Icon className="size-3.5" />
-                  </Button>
-                </div>
+                  source={source}
+                  selected={selectedSourceIds.includes(source.id)}
+                  onToggleSelected={() => toggleSourceSelection(source.id)}
+                  onDelete={() =>
+                    void handleDeleteSource(source.id, source.originalName)
+                  }
+                  deleteDisabled={actionLoading}
+                  onSaveMetadata={(updates) =>
+                    editSourceMetadata(source.id, updates)
+                  }
+                />
               ))
             )}
           </div>

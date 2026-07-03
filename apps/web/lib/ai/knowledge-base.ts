@@ -6,6 +6,8 @@ import type {
   AiSourceKind,
   AiSourceMetadata,
   AiSourceRecord,
+  AiUploadProgressCallback,
+  AiUploadProgressEvent,
 } from "@/lib/ai/types";
 import {
   buildBm25Index,
@@ -14,8 +16,16 @@ import {
   tokenize,
   type Bm25Index,
 } from "@/lib/ai/lexical-search";
+import { lookupCrossrefMetadata } from "@/lib/ai/crossref";
 
-export type { AiManifest, AiSourceKind, AiSourceMetadata, AiSourceRecord };
+export type {
+  AiManifest,
+  AiSourceKind,
+  AiSourceMetadata,
+  AiSourceRecord,
+  AiUploadProgressCallback,
+  AiUploadProgressEvent,
+};
 
 export interface AiChunkRecord {
   id: string;
@@ -323,7 +333,10 @@ function invalidateKbCache(indexDir: string): void {
   kbCacheByIndexDir.delete(indexDir);
 }
 
-async function embedTexts(texts: string[]): Promise<number[][]> {
+async function embedTexts(
+  texts: string[],
+  onBatchDone?: (done: number, total: number) => void,
+): Promise<number[][]> {
   if (texts.length === 0) return [];
 
   const extractor = await getEmbeddingPipeline();
@@ -334,6 +347,7 @@ async function embedTexts(texts: string[]): Promise<number[][]> {
     const batch = texts.slice(index, index + batchSize);
     const output = await extractor(batch, { pooling: "mean", normalize: true });
     vectors.push(...(output.tolist() as number[][]));
+    onBatchDone?.(vectors.length, texts.length);
   }
 
   return vectors;
@@ -419,13 +433,215 @@ export function extractYearFromPdfDate(raw: unknown): string | undefined {
 // unstructured text is a far more consequential mistake than a rough title
 // guess. Tagged "heuristic" provenance so callers (ensure_bibtex_entry) know
 // never to treat it as verified.
+//
+// Prefers the text's own first line over blindly truncating a flattened
+// blob — a markdown "# Title" heading or a plain-text file's title-on-its-
+// own-line is a much cleaner signal than a mid-sentence cutoff, and this is
+// the raw (not whitespace-flattened) text specifically so that line break
+// survives to be found. Falls back to the flattened blob when the caller
+// has no line structure available (e.g. text already flattened upstream,
+// as with the PDF fallback path in extractSourceText).
 export function heuristicTitleFromText(text: string): string | undefined {
-  const normalized = normalizeWhitespace(text).trim();
-  if (!normalized) return undefined;
   const HEURISTIC_TITLE_MAX_CHARS = 150;
-  return normalized.length > HEURISTIC_TITLE_MAX_CHARS
-    ? `${normalized.slice(0, HEURISTIC_TITLE_MAX_CHARS).trimEnd()}…`
-    : normalized;
+
+  const firstLine = text
+    .split("\n")
+    .map((line) => normalizeWhitespace(line))
+    .find((line) => line.length > 0);
+
+  const candidate = firstLine ?? normalizeWhitespace(text);
+  if (!candidate) return undefined;
+
+  return candidate.length > HEURISTIC_TITLE_MAX_CHARS
+    ? `${candidate.slice(0, HEURISTIC_TITLE_MAX_CHARS).trimEnd()}…`
+    : candidate;
+}
+
+interface PdfTextItem {
+  str?: string;
+  transform?: number[];
+  width?: number;
+}
+
+interface PageLine {
+  text: string;
+  fontSize: number;
+  y: number;
+}
+
+// Groups page-1 text items into visual lines (by Y-proximity) and
+// reconstructs each line's text left-to-right. Inserts a comma when
+// consecutive items on the same line have an implausibly large horizontal
+// gap between them — the signature of a multi-column layout (e.g. two
+// authors' name/affiliation blocks side by side, confirmed live) rather
+// than ordinary word spacing.
+function buildPageLines(items: PdfTextItem[]): PageLine[] {
+  const Y_TOLERANCE = 2;
+  const COLUMN_GAP_THRESHOLD = 20;
+
+  const positioned = items
+    .map((item) => ({
+      text: (item.str ?? "").trim(),
+      fontSize: item.transform?.[0] ?? 0,
+      x: item.transform?.[4] ?? 0,
+      y: item.transform?.[5] ?? 0,
+      width: item.width ?? 0,
+    }))
+    .filter((item) => item.text && item.fontSize > 0);
+
+  const clusters: Array<{ y: number; items: typeof positioned }> = [];
+  for (const item of positioned) {
+    const cluster = clusters.find((c) => Math.abs(c.y - item.y) < Y_TOLERANCE);
+    if (cluster) cluster.items.push(item);
+    else clusters.push({ y: item.y, items: [item] });
+  }
+
+  const lines: PageLine[] = [];
+  for (const cluster of clusters) {
+    const sorted = [...cluster.items].sort((a, b) => a.x - b.x);
+    let text = "";
+    let prevEndX: number | null = null;
+    let sizeWeightSum = 0;
+    let charWeightSum = 0;
+    for (const item of sorted) {
+      if (prevEndX !== null) {
+        text += item.x - prevEndX > COLUMN_GAP_THRESHOLD ? ", " : " ";
+      }
+      text += item.text;
+      prevEndX = item.x + item.width;
+      sizeWeightSum += item.fontSize * item.text.length;
+      charWeightSum += item.text.length;
+    }
+    const normalized = normalizeWhitespace(text);
+    if (!normalized) continue;
+    lines.push({
+      text: normalized,
+      fontSize: charWeightSum > 0 ? sizeWeightSum / charWeightSum : 0,
+      y: cluster.y,
+    });
+  }
+  return lines;
+}
+
+const MIN_TITLE_CHARS = 4;
+const MAX_TITLE_CHARS = 200;
+
+// A PDF's title is almost always set in a visibly larger font than the
+// author names/affiliations/running headers around it — confirmed against
+// both a book's title page (title at 74pt, author at 28pt) and an academic
+// paper's title block (title at ~24pt wrapping two lines, authors at
+// ~11pt). Collecting every line at a given size naturally reconstructs a
+// wrapped multi-line title without pulling in the smaller-font text below.
+//
+// The largest font size on the page isn't always the title, though — a
+// decorative drop cap (a single oversized capital letter starting the body
+// text, common in academic/magazine layouts) is frequently set even bigger
+// than the title itself (confirmed live: a real paper's drop-cap "T" at
+// 29.9pt outsized its actual 23.9pt title). A real title is essentially
+// never just one or two characters, so implausibly short size groups are
+// skipped in favor of the next-largest one instead of trusting size alone.
+function selectTitleLines(
+  lines: PageLine[],
+): { text: string; fontSize: number; ys: number[] } | undefined {
+  const bySize = new Map<number, PageLine[]>();
+  for (const line of lines) {
+    // Round to the nearest half-point so floating-point noise between
+    // glyphs of what's visually the same size still groups together.
+    const bucket = Math.round(line.fontSize * 2) / 2;
+    const group = bySize.get(bucket);
+    if (group) group.push(line);
+    else bySize.set(bucket, [line]);
+  }
+
+  const sizesLargestFirst = [...bySize.keys()].sort((a, b) => b - a);
+  for (const size of sizesLargestFirst) {
+    const group = bySize.get(size)!;
+    const text = normalizeWhitespace(group.map((l) => l.text).join(" "));
+    if (text.length < MIN_TITLE_CHARS) continue;
+    return { text, fontSize: size, ys: group.map((l) => l.y) };
+  }
+  return undefined;
+}
+
+// Bibliographic front matter (affiliations, abstracts, running heads) that
+// can plausibly sit near a title/byline in a similar font size — excluded
+// so the byline search doesn't mistake one of these for an author list.
+const NON_AUTHOR_MARKERS =
+  /\b(abstract|keywords|introduction|university|institute|department|school of|technical report|working paper|proceedings|conference|journal|volume|editor|editors|edited by|doi|www\.|https?:)\b/i;
+
+// A conservative "does this look like a list of person names" check: split
+// on common name-list separators, and require most segments to match a
+// simple capitalized-word-sequence pattern (optionally with initials).
+// Deliberately permissive on WHICH characters count as a name (so it
+// doesn't reject real names) but strict on overall shape, since the goal is
+// avoiding a false-positive (misattributing a subtitle/affiliation as
+// authors) more than catching every real byline.
+const NAME_SEGMENT_PATTERN =
+  /^[\p{Lu}][\p{L}'-]*\.?(?:\s+[\p{Lu}][\p{L}'.-]*){0,3}$/u;
+
+function looksLikeByline(text: string): boolean {
+  if (!text || text.length > 200) return false;
+  if (NON_AUTHOR_MARKERS.test(text)) return false;
+
+  const segments = text
+    .split(/,|\band\b|&/i)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+  if (segments.length === 0) return false;
+
+  const nameLikeCount = segments.filter((segment) =>
+    NAME_SEGMENT_PATTERN.test(segment),
+  ).length;
+  return nameLikeCount / segments.length >= 0.6;
+}
+
+// A byline isn't always directly below the title — a book cover can put
+// the author's name in a banner above it (confirmed live) while an
+// academic paper puts it directly below — so this searches outward from
+// the title by Y-distance in either direction, taking the nearest line
+// that actually looks like a name list rather than assuming a fixed
+// direction or trusting proximity alone (a caption, running head, or the
+// stray superscript-affiliation-number line pdf.js sometimes reports as
+// its own cluster can be nearer than the real byline; looksLikeByline
+// rejects those and the search continues outward).
+function selectByline(
+  lines: PageLine[],
+  title: { fontSize: number; ys: number[] },
+): string[] | undefined {
+  const titleYs = new Set(title.ys);
+  const candidates = lines
+    .filter((line) => !titleYs.has(line.y) && line.fontSize < title.fontSize - 0.5)
+    .map((line) => ({
+      line,
+      distance: Math.min(...title.ys.map((y) => Math.abs(y - line.y))),
+    }))
+    .sort((a, b) => a.distance - b.distance);
+
+  for (const { line } of candidates) {
+    if (looksLikeByline(line.text)) {
+      const authors = line.text
+        .split(/,|\band\b|&/i)
+        .map((author) => author.trim())
+        .filter(Boolean);
+      return authors.length > 0 ? authors : undefined;
+    }
+  }
+  return undefined;
+}
+
+function analyzePageOneLayout(
+  items: PdfTextItem[],
+): { title: string | undefined; authors: string[] | undefined } {
+  const lines = buildPageLines(items);
+  const titleLines = selectTitleLines(lines);
+  if (!titleLines) return { title: undefined, authors: undefined };
+
+  const title =
+    titleLines.text.length > MAX_TITLE_CHARS
+      ? `${titleLines.text.slice(0, MAX_TITLE_CHARS).trimEnd()}…`
+      : titleLines.text;
+
+  return { title, authors: selectByline(lines, titleLines) };
 }
 
 async function extractPdfMetadata(
@@ -462,14 +678,23 @@ async function extractPdfPages(
 ): Promise<{
   pages: Array<{ page: number; text: string }>;
   metadata: AiSourceMetadata | undefined;
+  layoutTitle: string | undefined;
+  layoutAuthors: string[] | undefined;
 }> {
   const pdfjs: any = await import("pdfjs-dist/legacy/build/pdf.mjs");
   const document = await pdfjs.getDocument({ data }).promise;
   const pages: Array<{ page: number; text: string }> = [];
+  let layoutTitle: string | undefined;
+  let layoutAuthors: string[] | undefined;
 
   for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
     const page = await document.getPage(pageNumber);
     const content = await page.getTextContent();
+    if (pageNumber === 1) {
+      const layout = analyzePageOneLayout(content.items);
+      layoutTitle = layout.title;
+      layoutAuthors = layout.authors;
+    }
     const text = content.items
       .map((item: any) => ("str" in item ? item.str : ""))
       .join(" ");
@@ -477,7 +702,7 @@ async function extractPdfPages(
   }
 
   const metadata = await extractPdfMetadata(document, fileName);
-  return { pages, metadata };
+  return { pages, metadata, layoutTitle, layoutAuthors };
 }
 
 async function extractSourceText(
@@ -490,20 +715,99 @@ async function extractSourceText(
 }> {
   const ext = path.extname(fileName).toLowerCase();
   if (ext === ".pdf") {
-    const { pages, metadata } = await extractPdfPages(data, fileName);
-    const fallbackTitle = () => heuristicTitleFromText(pages[0]?.text ?? "");
+    const { pages, metadata, layoutTitle, layoutAuthors } = await extractPdfPages(
+      data,
+      fileName,
+    );
+    const fallbackTitle = () =>
+      layoutTitle ?? heuristicTitleFromText(pages[0]?.text ?? "");
+
+    if (!metadata) {
+      return {
+        pageCount: pages.length,
+        pages,
+        metadata: {
+          title: fallbackTitle(),
+          titleIsHeuristic: true,
+          authors: layoutAuthors,
+          authorsAreHeuristic: layoutAuthors ? true : undefined,
+          provenance: "heuristic",
+        },
+      };
+    }
+
+    // The PDF's own metadata dictionary can have a real CreationDate but a
+    // genuinely blank Title/Author (common for LaTeX output that never set
+    // \hypersetup{pdftitle=..., pdfauthor=...}) — backfill just the missing
+    // fields from the page-1 layout analysis rather than discarding
+    // whatever real data the dictionary did have. titleIsHeuristic/
+    // authorsAreHeuristic keep any backfilled field out of anything
+    // citation-safety-sensitive (see ensureBibtexEntry).
+    const needsTitleBackfill = !metadata.title;
+    const needsAuthorsBackfill = !metadata.authors?.length;
+    if (!needsTitleBackfill && !needsAuthorsBackfill) {
+      return { pageCount: pages.length, pages, metadata };
+    }
+
     return {
       pageCount: pages.length,
       pages,
-      metadata: metadata ?? { title: fallbackTitle(), provenance: "heuristic" },
+      metadata: {
+        ...metadata,
+        title: needsTitleBackfill ? fallbackTitle() : metadata.title,
+        titleIsHeuristic: needsTitleBackfill ? true : metadata.titleIsHeuristic,
+        authors: needsAuthorsBackfill ? layoutAuthors : metadata.authors,
+        authorsAreHeuristic: needsAuthorsBackfill
+          ? layoutAuthors
+            ? true
+            : undefined
+          : metadata.authorsAreHeuristic,
+      },
     };
   }
 
-  const text = normalizeWhitespace(Buffer.from(data).toString("utf8"));
+  const rawText = Buffer.from(data).toString("utf8");
   return {
     pageCount: null,
-    pages: [{ page: 1, text }],
-    metadata: { title: heuristicTitleFromText(text), provenance: "heuristic" },
+    pages: [{ page: 1, text: normalizeWhitespace(rawText) }],
+    // Raw (pre-flatten) text specifically — heuristicTitleFromText wants
+    // the original line breaks to find a title-on-its-own-line, which
+    // normalizeWhitespace would already have collapsed away.
+    metadata: {
+      title: heuristicTitleFromText(rawText),
+      titleIsHeuristic: true,
+      provenance: "heuristic",
+    },
+  };
+}
+
+// Upgrades whatever extractSourceText already produced (pdf-metadata and/or
+// layout-heuristic guesses) to a CrossRef-verified record when a confident
+// match exists. Deliberately called only once, at upload time, from
+// appendSourcesToIndex's per-source loop — NOT from inside
+// extractSourceText itself, since that function is also called on every
+// citation-verification/full-text read (readAiSourcePage, readAiSourceFull)
+// and a chat turn shouldn't pay a ~10-25s network round trip just to
+// re-check a quote against a page that was already ingested.
+async function enrichMetadataWithCrossref(
+  metadata: AiSourceMetadata,
+): Promise<AiSourceMetadata> {
+  if (!metadata.title) return metadata;
+
+  const crossref = await lookupCrossrefMetadata(metadata.title);
+  if (!crossref) return metadata;
+
+  const hasCrossrefAuthors = crossref.authors.length > 0;
+  return {
+    title: crossref.title,
+    titleIsHeuristic: false,
+    authors: hasCrossrefAuthors ? crossref.authors : metadata.authors,
+    authorsAreHeuristic: hasCrossrefAuthors
+      ? false
+      : metadata.authorsAreHeuristic,
+    year: crossref.year ?? metadata.year,
+    doi: crossref.doi,
+    provenance: "crossref",
   };
 }
 
@@ -656,6 +960,7 @@ async function assertIndexIntegrity(
 async function appendSourcesToIndex(
   projectDir: string,
   newSources: AiSourceRecord[],
+  onProgress?: AiUploadProgressCallback,
 ): Promise<void> {
   const { indexDir } = await ensureAiWorkspace(projectDir);
   const chunksPath = path.join(indexDir, CHUNKS_FILE);
@@ -679,7 +984,13 @@ async function appendSourcesToIndex(
   const pageCounts = new Map<string, number | null>();
   const metadataById = new Map<string, AiSourceMetadata>();
 
-  for (const source of newSources) {
+  for (const [index, source] of newSources.entries()) {
+    onProgress?.({
+      stage: "extracting",
+      fileName: source.originalName,
+      fileIndex: index,
+      fileCount: newSources.length,
+    });
     const { records, texts, pageCount, metadata } = await extractAndChunkSource(
       projectDir,
       source,
@@ -687,11 +998,30 @@ async function appendSourcesToIndex(
     newRecords.push(...records);
     newTexts.push(...texts);
     pageCounts.set(source.id, pageCount);
-    metadataById.set(source.id, metadata);
+
+    // CrossRef lookup only for actual papers — never for markdown/text
+    // uploads (out of scope, CrossRef doesn't index arbitrary notes) and
+    // critically never for kind "note" (the AI's own saved research notes),
+    // where searching CrossRef for a note's own title risks attaching a
+    // real, unrelated paper's data to it.
+    if (source.kind === "pdf") {
+      onProgress?.({
+        stage: "verifying",
+        fileName: source.originalName,
+        fileIndex: index,
+        fileCount: newSources.length,
+      });
+      metadataById.set(source.id, await enrichMetadataWithCrossref(metadata));
+    } else {
+      metadataById.set(source.id, metadata);
+    }
   }
 
-  const newVectors = await embedTexts(newTexts);
+  const newVectors = await embedTexts(newTexts, (done, total) => {
+    onProgress?.({ stage: "embedding", chunksDone: done, chunksTotal: total });
+  });
   const dimensions = newVectors[0]?.length ?? existingDimensions;
+  onProgress?.({ stage: "indexing" });
 
   if (newRecords.length > 0) {
     const chunkLines = `${newRecords.map((record) => JSON.stringify(record)).join("\n")}\n`;
@@ -810,6 +1140,7 @@ export interface UploadAiSourcesResult {
 export async function uploadAiSources(
   projectDir: string,
   files: File[],
+  onProgress?: AiUploadProgressCallback,
 ): Promise<UploadAiSourcesResult> {
   const { sourcesDir, indexDir } = await ensureAiWorkspace(projectDir);
   await fs.mkdir(indexDir, { recursive: true });
@@ -817,7 +1148,7 @@ export async function uploadAiSources(
   const newSources: AiSourceRecord[] = [];
   const rejected: RejectedSourceFile[] = [];
 
-  for (const file of files) {
+  for (const [index, file] of files.entries()) {
     const originalName = sanitizeFileName(file.name);
     const ext = path.extname(originalName).toLowerCase();
 
@@ -837,6 +1168,12 @@ export async function uploadAiSources(
       continue;
     }
 
+    onProgress?.({
+      stage: "saving",
+      fileName: originalName,
+      fileIndex: index,
+      fileCount: files.length,
+    });
     const id = crypto.randomUUID();
     const bytes = new Uint8Array(await file.arrayBuffer());
     const saved = await saveSourceFile(sourcesDir, id, originalName, bytes);
@@ -854,7 +1191,7 @@ export async function uploadAiSources(
   }
 
   if (newSources.length > 0) {
-    await appendSourcesToIndex(projectDir, newSources);
+    await appendSourcesToIndex(projectDir, newSources, onProgress);
   }
 
   return { manifest: await readManifest(projectDir), rejected };
@@ -1129,6 +1466,43 @@ export async function setAiSourceBibKey(
   }
 
   source.bibKey = bibKey;
+  source.updatedAt = nowIso();
+  await writeManifest(projectDir, { ...manifest, updatedAt: nowIso() });
+  return source;
+}
+
+// A human confirming (or correcting) a source's bibliographic details is
+// the single most trustworthy signal this system ever gets — more so than
+// CrossRef, since a person is looking at the actual document. Saving here
+// always sets provenance "manual" and clears both heuristic flags: the edit
+// form shows title/authors/year together, so submitting it means the user
+// has reviewed all three, not just the one field they happened to change.
+export async function updateAiSourceMetadata(
+  projectDir: string,
+  sourceId: string,
+  updates: { title?: string; authors?: string[]; year?: string },
+): Promise<AiSourceRecord> {
+  const manifest = await readManifest(projectDir);
+  const source = manifest.sources.find((entry) => entry.id === sourceId);
+  if (!source) {
+    throw new Error("Source not found");
+  }
+
+  const title = updates.title?.trim();
+  const authors = updates.authors
+    ?.map((author) => author.trim())
+    .filter(Boolean);
+  const year = updates.year?.trim();
+
+  source.metadata = {
+    ...source.metadata,
+    title: title || undefined,
+    authors: authors?.length ? authors : undefined,
+    year: year || undefined,
+    provenance: "manual",
+    titleIsHeuristic: false,
+    authorsAreHeuristic: false,
+  };
   source.updatedAt = nowIso();
   await writeManifest(projectDir, { ...manifest, updatedAt: nowIso() });
   return source;

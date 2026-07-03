@@ -9,6 +9,7 @@ import type {
   AiMessage,
   AiRejectedSourceFile,
   AiSourceRecord,
+  AiUploadProgressEvent,
 } from "@/lib/ai/types";
 import {
   deleteAiConversation,
@@ -17,6 +18,7 @@ import {
   fetchAiConversations,
   fetchAiManifest,
   streamAiChat,
+  updateAiSourceMetadata,
   uploadAiSources,
 } from "@/lib/ai/ai-client";
 
@@ -32,12 +34,17 @@ interface AiState {
   error: string | null;
   actionLoading: boolean;
   chatLoading: boolean;
+  uploadProgress: AiUploadProgressEvent | null;
   compactionNotice: AiCompactionNotice | null;
   dismissCompactionNotice: () => void;
   loadSources: () => Promise<void>;
   loadConversations: () => Promise<void>;
   uploadSources: (files: File[]) => Promise<AiRejectedSourceFile[]>;
   removeSource: (sourceId: string) => Promise<void>;
+  editSourceMetadata: (
+    sourceId: string,
+    updates: { title: string; authors: string[]; year: string },
+  ) => Promise<void>;
   createConversation: (title?: string) => Promise<string>;
   selectConversation: (conversationId: string) => Promise<void>;
   removeConversation: (conversationId: string) => Promise<void>;
@@ -146,6 +153,7 @@ export const useAiStore = create<AiState>((set, get) => ({
   error: null,
   actionLoading: false,
   chatLoading: false,
+  uploadProgress: null,
   compactionNotice: null,
 
   async loadSources() {
@@ -183,9 +191,11 @@ export const useAiStore = create<AiState>((set, get) => ({
 
   async uploadSources(files: File[]) {
     const token = ++sourcesOpSeq;
-    set({ actionLoading: true, error: null });
+    set({ actionLoading: true, error: null, uploadProgress: null });
     try {
-      const { rejected, ...manifest } = await uploadAiSources(files);
+      const { rejected, ...manifest } = await uploadAiSources(files, (event) => {
+        if (token === sourcesOpSeq) set({ uploadProgress: event });
+      });
       if (token !== sourcesOpSeq) return rejected;
       set({ manifest, sources: manifest.sources });
       return rejected;
@@ -197,7 +207,7 @@ export const useAiStore = create<AiState>((set, get) => ({
       });
       throw error;
     } finally {
-      if (token === sourcesOpSeq) set({ actionLoading: false });
+      if (token === sourcesOpSeq) set({ actionLoading: false, uploadProgress: null });
     }
   },
 
@@ -228,6 +238,33 @@ export const useAiStore = create<AiState>((set, get) => ({
       set({
         error:
           error instanceof Error ? error.message : "Failed to delete source",
+      });
+      throw error;
+    } finally {
+      if (token === sourcesOpSeq) set({ actionLoading: false });
+    }
+  },
+
+  async editSourceMetadata(sourceId, updates) {
+    const token = ++sourcesOpSeq;
+    set({ actionLoading: true, error: null });
+    try {
+      const updated = await updateAiSourceMetadata(sourceId, updates);
+      if (token !== sourcesOpSeq) return;
+      set((state) => {
+        const sources = state.sources.map((source) =>
+          source.id === sourceId ? updated : source,
+        );
+        return {
+          sources,
+          manifest: state.manifest ? { ...state.manifest, sources } : state.manifest,
+        };
+      });
+    } catch (error) {
+      if (token !== sourcesOpSeq) return;
+      set({
+        error:
+          error instanceof Error ? error.message : "Failed to update source",
       });
       throw error;
     } finally {
