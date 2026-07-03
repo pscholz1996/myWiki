@@ -68,10 +68,13 @@ Open [http://localhost:3000](http://localhost:3000).
 apps/web/
 ├── app/api/              # Next.js API routes
 │   ├── fs/               #   File operations (list, read, write, watch SSE)
-│   ├── git/              #   Git operations (info, status, stage, unstage, commit, pull, push)
+│   ├── git/              #   Git operations (info, status, stage, unstage, commit, pull, push, log, show)
+│   ├── gh/               #   GitHub CLI integration (auth status, publish, open-on-GitHub)
 │   ├── compile/          #   LaTeX compilation (reads from disk, proxies to latex-api)
 │   ├── pdf/cached/       #   Serves cached PDF if still fresh
-│   └── project/          #   Project picker API (current, set, browse)
+│   ├── synctex/          #   Register/query SyncTeX mapping for a build
+│   ├── project/          #   Project picker API (current, set, browse, create)
+│   └── ai/               #   Chat (SSE), conversation, sources, search, citations, usage
 ├── components/
 │   ├── ui/               #   shadcn/ui primitives (button, dialog, tooltip, etc.)
 │   ├── project/          #     Welcome screen, directory browser, project switcher
@@ -83,8 +86,9 @@ apps/web/
 ├── lib/
 │   ├── fs/               #   Sandbox, echo suppression, watcher, project-dir, clients
 │   ├── git/              #   Git runner (server-side execFile), Git client (browser fetch)
+│   ├── ai/               #   Knowledge base, CrossRef lookup, citation audit, chat agent
 │   └── project/          #   Config module (~/openlatex/config.json), path utils
-├── stores/               #   Zustand stores: fs, editor, pdf, git
+├── stores/               #   Zustand stores: fs, editor, pdf, git, ai, github
 └── styles/               #   Tailwind CSS v4 globals
 ```
 
@@ -94,7 +98,8 @@ apps/web/
 - **Path sandboxing.** Every filesystem route validates paths via `resolveInProject()` from `lib/fs/sandbox.ts`. Always use it for any new FS route.
 - **Echo suppression.** When the server writes a file, it records the write so the chokidar watcher can drop the resulting event. See `lib/fs/echo-suppression.ts`.
 - **No shell injection.** Git commands use `execFile` (args as array). Never use `exec` or template strings for command construction.
-- **Zustand for state.** Four stores: `fs-store` (file tree), `editor-store` (active file + buffer), `pdf-store` (PDF bytes + compile status), `git-store` (branch, statuses, actions).
+- **Zustand for state.** Six stores: `fs-store` (file tree), `editor-store` (active file + buffer), `pdf-store` (PDF bytes + compile status), `git-store` (branch, statuses, actions), `ai-store` (conversation, sources, plan usage), `github-store` (auth state).
+- **Citations are never trusted from memory.** The AI agent's `cite()` tool re-verifies every quote against a source's actual extracted text at the moment of citing — never from what the model recalls saying earlier. Keep this true for any new AI tool that touches citations.
 
 ### Testing
 
@@ -107,8 +112,12 @@ pnpm test:watch    # Watch mode
 Unit tests cover the security-critical modules:
 - `lib/fs/sandbox.test.ts` — Path resolution and traversal rejection
 - `lib/fs/echo-suppression.test.ts` — Write-echo tracking with fake timers
+- `lib/ai/knowledge-base.test.ts` — Chunking, embedding search, citation verification
+- `lib/ai/crossref.test.ts` — Bibliographic metadata lookup and trust ordering
+- `lib/ai/citation-audit.test.ts` — Detecting broken/missing/unlinked citations
 
-A manual test checklist lives at `docs/manual-test-plan.md`.
+There's no standing manual test checklist file — UI/functional changes are
+verified live against a running instance as part of development instead.
 
 ## Code Style
 
