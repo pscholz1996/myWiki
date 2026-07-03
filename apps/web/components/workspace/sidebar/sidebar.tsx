@@ -11,7 +11,6 @@ import {
   GitBranchIcon,
   ChevronDownIcon,
 } from "lucide-react";
-import { SiGithub } from "@icons-pack/react-simple-icons";
 import { useTheme } from "next-themes";
 import {
   Panel,
@@ -276,16 +275,6 @@ export function Sidebar() {
         <span>OpenLatex v{packageJson.version}</span>
         <div className="flex items-center gap-1">
           <GithubAccountMenu />
-          <Button variant="ghost" size="icon" className="size-6" asChild>
-            <a
-              href="https://github.com/xTazah/OpenLatex"
-              target="_blank"
-              rel="noopener noreferrer"
-              title="GitHub"
-            >
-              <SiGithub className="size-3.5" color="currentColor" />
-            </a>
-          </Button>
           {mounted && (
             <Button
               variant="ghost"

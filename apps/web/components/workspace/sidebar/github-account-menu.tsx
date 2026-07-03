@@ -53,7 +53,7 @@ export function GithubAccountMenu() {
           <Button
             variant="ghost"
             size="icon"
-            className="size-6"
+            className="size-7"
             title={
               authenticated && user
                 ? `Signed in as @${user.login}`
@@ -65,10 +65,10 @@ export function GithubAccountMenu() {
               <img
                 src={user.avatarUrl}
                 alt=""
-                className="size-4 rounded-full"
+                className="size-5 rounded-full"
               />
             ) : (
-              <SiGithub className="size-3.5" color="currentColor" />
+              <SiGithub className="size-5" color="currentColor" />
             )}
           </Button>
         </DropdownMenuTrigger>
