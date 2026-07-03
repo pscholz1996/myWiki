@@ -14,7 +14,6 @@ import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { useAiStore } from "@/stores/ai-store";
 import {
-  BadgeInfoIcon,
   FolderPlusIcon,
   Loader2Icon,
   SearchIcon,
@@ -71,40 +70,102 @@ function describeUploadProgress(
   }
 }
 
+// "in 2h 44m" / "in 44m" — a short countdown to a reset timestamp, matching
+// the Claude app's own usage view rather than a full date/time. null when
+// the SDK didn't supply a reset time, so the caller can omit the line
+// instead of showing a made-up placeholder.
+function formatResetCountdown(resetsAt: string | null): string | null {
+  if (!resetsAt) return null;
+  const ms = new Date(resetsAt).getTime() - Date.now();
+  if (Number.isNaN(ms)) return null;
+  if (ms <= 0) return "shortly";
+  const totalMinutes = Math.round(ms / 60000);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours === 0) return `in ${minutes}m`;
+  if (minutes === 0) return `in ${hours}h`;
+  return `in ${hours}h ${minutes}m`;
+}
+
+// "Wed 21:00" — the weekly window resets days out, so an absolute
+// day+time (as the Claude app shows) is more useful than a countdown.
+function formatResetDayTime(resetsAt: string | null): string | null {
+  if (!resetsAt) return null;
+  const date = new Date(resetsAt);
+  if (Number.isNaN(date.getTime())) return null;
+  return new Intl.DateTimeFormat(undefined, {
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function UsageCard({
+  label,
+  percent,
+  resetLabel,
+}: {
+  label: string;
+  percent: number;
+  resetLabel: string | null;
+}) {
+  const clamped = Math.min(100, Math.max(0, Math.round(percent)));
+  return (
+    <div className="grid gap-1.5 rounded-lg border bg-muted/20 p-3">
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-medium text-sm">{label}</span>
+        <span className="text-muted-foreground text-xs">{clamped}% used</span>
+      </div>
+      <div className="h-1.5 overflow-hidden rounded-full bg-border">
+        <div
+          className="h-full rounded-full bg-primary transition-[width] duration-300 ease-out"
+          style={{ width: `${clamped}%` }}
+        />
+      </div>
+      {resetLabel ? (
+        <div className="text-muted-foreground text-xs">Resets {resetLabel}</div>
+      ) : null}
+    </div>
+  );
+}
+
 // Plan-level rate-limit usage (5-hour/weekly), not this conversation's own
 // token count — only available once a live SDK session exists (after the
 // first message of a server run), so planUsage is null until then.
-function formatPlanUsage(planUsage: AiPlanUsage | null): {
-  label: string;
-  title?: string;
-} {
-  if (!planUsage) {
-    return { label: "Plan usage pending" };
+function UsageSection({ planUsage }: { planUsage: AiPlanUsage | null }) {
+  if (!planUsage || (!planUsage.fiveHour && !planUsage.sevenDay)) {
+    return (
+      <div className="text-muted-foreground text-xs">
+        {planUsage
+          ? "Plan usage limits aren't available for this account."
+          : "Usage limits appear here after your first message."}
+      </div>
+    );
   }
-  if (!planUsage.fiveHour && !planUsage.sevenDay) {
-    return { label: "Plan limits not available for this account" };
-  }
 
-  const plan = planUsage.subscriptionType
-    ? `${planUsage.subscriptionType.charAt(0).toUpperCase()}${planUsage.subscriptionType.slice(1)} · `
-    : "";
-  const parts = [
-    planUsage.fiveHour ? `5h ${Math.round(planUsage.fiveHour.utilization)}%` : null,
-    planUsage.sevenDay ? `7d ${Math.round(planUsage.sevenDay.utilization)}%` : null,
-  ].filter((part): part is string => part !== null);
-
-  const resets = [
-    planUsage.fiveHour?.resetsAt
-      ? `5-hour window resets ${new Date(planUsage.fiveHour.resetsAt).toLocaleString()}`
-      : null,
-    planUsage.sevenDay?.resetsAt
-      ? `Weekly window resets ${new Date(planUsage.sevenDay.resetsAt).toLocaleString()}`
-      : null,
-  ]
-    .filter((part): part is string => part !== null)
-    .join(" · ");
-
-  return { label: `${plan}${parts.join(" · ")}`, title: resets || undefined };
+  return (
+    <div className="grid gap-2">
+      {planUsage.fiveHour ? (
+        <UsageCard
+          label="Current Session"
+          percent={planUsage.fiveHour.utilization}
+          resetLabel={formatResetCountdown(planUsage.fiveHour.resetsAt)}
+        />
+      ) : null}
+      {planUsage.sevenDay ? (
+        <>
+          <div className="font-medium text-muted-foreground text-xs uppercase tracking-wider">
+            Weekly Limits
+          </div>
+          <UsageCard
+            label="All Models"
+            percent={planUsage.sevenDay.utilization}
+            resetLabel={formatResetDayTime(planUsage.sevenDay.resetsAt)}
+          />
+        </>
+      ) : null}
+    </div>
+  );
 }
 
 type SourceSortMode = "recent" | "title" | "author" | "year";
@@ -378,10 +439,6 @@ export function AiPanel() {
           </div>
         </div>
         <div className="flex flex-col items-end gap-0.5 text-muted-foreground text-xs">
-          <div className="flex items-center gap-2" title={formatPlanUsage(planUsage).title}>
-            <BadgeInfoIcon className="size-3.5" />
-            {formatPlanUsage(planUsage).label}
-          </div>
           {activeConversation?.contextTokens ? (
             <div
               title="Estimated from the most recent turn's input + cached tokens against Sonnet 5's 1M context window — not an exact figure."
@@ -399,6 +456,8 @@ export function AiPanel() {
       </div>
 
       <div className="grid gap-3 border-b p-3">
+        <UsageSection planUsage={planUsage} />
+
         <div className="grid gap-2 rounded-lg border bg-muted/20 p-3">
           <div className="flex items-center justify-between gap-2">
             <div>
