@@ -321,7 +321,11 @@ export const useAiStore = create<AiState>((set, get) => ({
     const activeConversation: AiConversation = get().activeConversation ?? {
       id: MAIN_CONVERSATION_ID,
       model: "claude-sonnet-5",
-      sdkSessionId: MAIN_CONVERSATION_ID,
+      // Optimistic placeholder only — never sent to the server (AiChatRequest
+      // has no sdkSessionId field) and overwritten once the real conversation
+      // reloads. Still a real UUID, not MAIN_CONVERSATION_ID, so nothing that
+      // reads this client-side object mistakes it for a valid SDK session id.
+      sdkSessionId: newId(),
       messages: [],
       sourceIds: get().currentSourceIds,
       updatedAt: nowIso(),

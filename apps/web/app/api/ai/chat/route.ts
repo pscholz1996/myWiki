@@ -182,7 +182,14 @@ export async function POST(req: Request) {
       ...conversation,
       model: body.model ?? conversation.model,
       sourceIds: body.sourceIds ?? conversation.sourceIds,
-      sdkSessionId: conversation.sdkSessionId ?? conversation.id,
+      // Must be a real UUID, independent of conversation.id: the Claude
+      // Agent SDK accepts any caller-chosen string for a brand-new session
+      // (sessionId, first turn only), but --resume on every turn after
+      // that requires a real UUID or session title. conversation.id is now
+      // the fixed, human-readable MAIN_CONVERSATION_ID ("main") rather than
+      // a UUID (see the single-continuing-conversation change), so it can
+      // no longer double as the SDK session id the way it used to.
+      sdkSessionId: conversation.sdkSessionId ?? randomUUID(),
     };
 
     const userMessage: AiMessage = {
