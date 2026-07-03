@@ -1,9 +1,21 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { pipeline } from "@huggingface/transformers";
-import type { AiManifest, AiSourceKind, AiSourceRecord } from "@/lib/ai/types";
+import type {
+  AiManifest,
+  AiSourceKind,
+  AiSourceMetadata,
+  AiSourceRecord,
+} from "@/lib/ai/types";
+import {
+  buildBm25Index,
+  reciprocalRankFusion,
+  scoreBm25,
+  tokenize,
+  type Bm25Index,
+} from "@/lib/ai/lexical-search";
 
-export type { AiManifest, AiSourceKind, AiSourceRecord };
+export type { AiManifest, AiSourceKind, AiSourceMetadata, AiSourceRecord };
 
 export interface AiChunkRecord {
   id: string;
@@ -164,21 +176,16 @@ async function writeEmbeddingMatrix(
   return dimensions;
 }
 
-function cosineSimilarity(left: Float32Array, right: Float32Array): number {
+// embedTexts always calls the pipeline with normalize: true, so every
+// stored vector and every query vector already has unit L2 norm — cosine
+// similarity between two unit vectors is exactly their dot product, no
+// need to (re-)compute and divide by magnitudes on every comparison.
+function dotProduct(left: Float32Array, right: Float32Array): number {
   let dot = 0;
-  let leftMagnitude = 0;
-  let rightMagnitude = 0;
-
   for (let index = 0; index < left.length; index += 1) {
-    const leftValue = left[index] ?? 0;
-    const rightValue = right[index] ?? 0;
-    dot += leftValue * rightValue;
-    leftMagnitude += leftValue * leftValue;
-    rightMagnitude += rightValue * rightValue;
+    dot += (left[index] ?? 0) * (right[index] ?? 0);
   }
-
-  const denominator = Math.sqrt(leftMagnitude) * Math.sqrt(rightMagnitude);
-  return denominator === 0 ? 0 : dot / denominator;
+  return dot;
 }
 
 async function readJsonLines<T>(filePath: string): Promise<T[]> {
@@ -213,6 +220,107 @@ async function getEmbeddingPipeline() {
   }
 
   return embeddingPipelinePromise;
+}
+
+// searchAiKnowledgeBase used to re-read and re-parse the entire index
+// (every chunk's JSON line, every embedding row) from disk on every single
+// call. Fine at a handful of sources; a real cost at a large knowledge
+// base. Cache the parsed data in memory, keyed by index directory, and
+// only re-read when the underlying files have actually changed.
+//
+// mtime-checked rather than purely explicit-invalidation: this project
+// already shipped and had to fix a cache that went stale independently per
+// route because a dev-mode bundler could give different API routes
+// different module instances, each with their own "cached" state (see
+// lib/fs/project-dir.ts's getProjectDir doc comment). An mtime check costs
+// two stat() calls and makes correctness not depend on every writer
+// remembering to invalidate — cheap insurance against the same failure
+// class recurring here.
+interface KbCache {
+  chunksMtimeMs: number;
+  embeddingsMtimeMs: number;
+  chunkRecords: AiChunkRecord[];
+  embeddingMatrix: Float32Array;
+  // Built once per cache load (tokenizing/indexing 30k+ chunks isn't free),
+  // not per query — the same reasoning as caching the parsed chunks/vectors.
+  bm25Index: Bm25Index;
+}
+
+const KB_CACHE_MAX_ENTRIES = 3;
+const kbCacheByIndexDir = new Map<string, KbCache>();
+
+function touchKbCache(indexDir: string, cache: KbCache): void {
+  // Map preserves insertion order — delete+reinsert marks this entry as
+  // most-recently-used; the least-recently-used entry is whatever is still
+  // first once we're over the bound.
+  kbCacheByIndexDir.delete(indexDir);
+  kbCacheByIndexDir.set(indexDir, cache);
+  if (kbCacheByIndexDir.size > KB_CACHE_MAX_ENTRIES) {
+    const oldestKey = kbCacheByIndexDir.keys().next().value;
+    if (oldestKey !== undefined) kbCacheByIndexDir.delete(oldestKey);
+  }
+}
+
+async function getKbIndex(indexDir: string): Promise<{
+  chunkRecords: AiChunkRecord[];
+  embeddingMatrix: Float32Array;
+  bm25Index: Bm25Index;
+}> {
+  const chunksPath = path.join(indexDir, CHUNKS_FILE);
+  const embeddingsPath = path.join(indexDir, EMBEDDINGS_FILE);
+
+  let chunksMtimeMs: number;
+  let embeddingsMtimeMs: number;
+  try {
+    const [chunksStat, embeddingsStat] = await Promise.all([
+      fs.stat(chunksPath),
+      fs.stat(embeddingsPath),
+    ]);
+    chunksMtimeMs = chunksStat.mtimeMs;
+    embeddingsMtimeMs = embeddingsStat.mtimeMs;
+  } catch {
+    // Index files don't exist yet — nothing to search.
+    return {
+      chunkRecords: [],
+      embeddingMatrix: new Float32Array(),
+      bm25Index: buildBm25Index([]),
+    };
+  }
+
+  const cached = kbCacheByIndexDir.get(indexDir);
+  if (
+    cached &&
+    cached.chunksMtimeMs === chunksMtimeMs &&
+    cached.embeddingsMtimeMs === embeddingsMtimeMs
+  ) {
+    touchKbCache(indexDir, cached);
+    return cached;
+  }
+
+  const [chunkRecords, embeddingMatrix] = await Promise.all([
+    readJsonLines<AiChunkRecord>(chunksPath),
+    readEmbeddingMatrix(embeddingsPath),
+  ]);
+  const bm25Index = buildBm25Index(
+    chunkRecords.map((chunk) => ({ id: chunk.id, text: chunk.text })),
+  );
+
+  const next: KbCache = {
+    chunksMtimeMs,
+    embeddingsMtimeMs,
+    chunkRecords,
+    embeddingMatrix,
+    bm25Index,
+  };
+  touchKbCache(indexDir, next);
+  return next;
+}
+
+/** Fast-path invalidation after this process writes the index — the mtime
+ * check above would eventually catch it anyway, but there's no reason to
+ * let a stale entry linger even briefly. */
+function invalidateKbCache(indexDir: string): void {
+  kbCacheByIndexDir.delete(indexDir);
 }
 
 async function embedTexts(texts: string[]): Promise<number[][]> {
@@ -270,9 +378,91 @@ export function chunkText(
   return chunks;
 }
 
+// PDF-export placeholder titles — confirmed against a real sample of ~20
+// academic PDFs, where "untitled" (unmodified word-processor/export
+// default) showed up as a Title value verbatim.
+const JUNK_TITLE_VALUES = new Set(["untitled", "untitled document", "untitled-1"]);
+
+// A PDF's Title metadata field is frequently either blank, a literal
+// "Untitled" left over from whatever tool exported it, or just the filename
+// a word processor defaulted to — none of those are usable titles, so
+// they're rejected rather than trusted. fileName is passed in so a title
+// that's merely the original filename (a common "didn't bother setting a
+// real title" case) is caught even when it doesn't look like a filename.
+export function isJunkPdfTitle(title: string, fileName: string): boolean {
+  const trimmed = title.trim();
+  if (!trimmed) return true;
+  if (JUNK_TITLE_VALUES.has(trimmed.toLowerCase())) return true;
+  if (/\.(pdf|docx?|tex|rtf)$/i.test(trimmed)) return true;
+
+  const bareFileName = path.basename(fileName, path.extname(fileName));
+  return trimmed.toLowerCase() === bareFileName.toLowerCase();
+}
+
+// PDF metadata dates use the format "D:YYYYMMDDHHmmSS+HH'mm'" (ISO 32000
+// §7.9.4) — only the four-digit year is needed here. Sanity-bounded so a
+// malformed or placeholder date (e.g. "D:00000000") doesn't produce a
+// nonsense year.
+export function extractYearFromPdfDate(raw: unknown): string | undefined {
+  if (typeof raw !== "string") return undefined;
+  const match = raw.match(/D:(\d{4})/);
+  if (!match) return undefined;
+
+  const year = Number(match[1]);
+  const currentYear = new Date().getFullYear();
+  if (year < 1900 || year > currentYear + 1) return undefined;
+  return String(year);
+}
+
+// Rough last-resort title guess when no PDF metadata (or no PDF at all) is
+// available — never used for authors, since misattributing authorship from
+// unstructured text is a far more consequential mistake than a rough title
+// guess. Tagged "heuristic" provenance so callers (ensure_bibtex_entry) know
+// never to treat it as verified.
+export function heuristicTitleFromText(text: string): string | undefined {
+  const normalized = normalizeWhitespace(text).trim();
+  if (!normalized) return undefined;
+  const HEURISTIC_TITLE_MAX_CHARS = 150;
+  return normalized.length > HEURISTIC_TITLE_MAX_CHARS
+    ? `${normalized.slice(0, HEURISTIC_TITLE_MAX_CHARS).trimEnd()}…`
+    : normalized;
+}
+
+async function extractPdfMetadata(
+  document: { getMetadata(): Promise<{ info?: Record<string, unknown> }> },
+  fileName: string,
+): Promise<AiSourceMetadata | undefined> {
+  try {
+    const { info } = await document.getMetadata();
+
+    const rawTitle = typeof info?.Title === "string" ? info.Title : "";
+    const title = isJunkPdfTitle(rawTitle, fileName) ? undefined : rawTitle.trim();
+
+    const rawAuthor = typeof info?.Author === "string" ? info.Author.trim() : "";
+    const authors = rawAuthor
+      ? rawAuthor
+          .split(/;|\band\b/i)
+          .map((author) => author.trim())
+          .filter(Boolean)
+      : undefined;
+
+    const year = extractYearFromPdfDate(info?.CreationDate);
+
+    if (!title && !authors?.length && !year) return undefined;
+    return { title, authors, year, provenance: "pdf-metadata" };
+  } catch {
+    // Malformed/absent metadata dictionary — fall back to the heuristic path.
+    return undefined;
+  }
+}
+
 async function extractPdfPages(
   data: Uint8Array,
-): Promise<Array<{ page: number; text: string }>> {
+  fileName: string,
+): Promise<{
+  pages: Array<{ page: number; text: string }>;
+  metadata: AiSourceMetadata | undefined;
+}> {
   const pdfjs: any = await import("pdfjs-dist/legacy/build/pdf.mjs");
   const document = await pdfjs.getDocument({ data }).promise;
   const pages: Array<{ page: number; text: string }> = [];
@@ -286,7 +476,8 @@ async function extractPdfPages(
     pages.push({ page: pageNumber, text: normalizeWhitespace(text) });
   }
 
-  return pages;
+  const metadata = await extractPdfMetadata(document, fileName);
+  return { pages, metadata };
 }
 
 async function extractSourceText(
@@ -295,17 +486,24 @@ async function extractSourceText(
 ): Promise<{
   pageCount: number | null;
   pages: Array<{ page: number | null; text: string }>;
+  metadata: AiSourceMetadata;
 }> {
   const ext = path.extname(fileName).toLowerCase();
   if (ext === ".pdf") {
-    const pages = await extractPdfPages(data);
-    return { pageCount: pages.length, pages };
+    const { pages, metadata } = await extractPdfPages(data, fileName);
+    const fallbackTitle = () => heuristicTitleFromText(pages[0]?.text ?? "");
+    return {
+      pageCount: pages.length,
+      pages,
+      metadata: metadata ?? { title: fallbackTitle(), provenance: "heuristic" },
+    };
   }
 
   const text = normalizeWhitespace(Buffer.from(data).toString("utf8"));
   return {
     pageCount: null,
     pages: [{ page: 1, text }],
+    metadata: { title: heuristicTitleFromText(text), provenance: "heuristic" },
   };
 }
 
@@ -332,7 +530,12 @@ export async function listAiSources(projectDir: string): Promise<AiManifest> {
 async function extractAndChunkSource(
   projectDir: string,
   source: AiSourceRecord,
-): Promise<{ records: AiChunkRecord[]; texts: string[]; pageCount: number | null }> {
+): Promise<{
+  records: AiChunkRecord[];
+  texts: string[];
+  pageCount: number | null;
+  metadata: AiSourceMetadata;
+}> {
   const sourcePath = path.join(
     projectDir,
     ".openlatex",
@@ -365,7 +568,78 @@ async function extractAndChunkSource(
     }
   }
 
-  return { records, texts, pageCount: extracted.pageCount };
+  return {
+    records,
+    texts,
+    pageCount: extracted.pageCount,
+    metadata: extracted.metadata,
+  };
+}
+
+/**
+ * Sanity check before appending onto an existing index. A full rewrite
+ * (the old strategy) is naturally self-healing — every write recreates
+ * the file from scratch. Append-only trades that away for O(new content)
+ * write cost, so verify the existing files are in the shape a clean
+ * sequence of appends would actually produce before adding more onto
+ * them — a torn write from a crash mid-append should surface as a clear,
+ * actionable error, not silently misaligned rows. rebuildAiIndex() is the
+ * repair path referenced in these errors: a full re-extract/re-embed from
+ * the raw source files, which sidesteps whatever is wrong with the index
+ * files themselves.
+ */
+async function assertIndexIntegrity(
+  chunksPath: string,
+  embeddingsPath: string,
+  dimensions: number,
+  expectedChunkCount: number,
+): Promise<void> {
+  const REPAIR_HINT = "Rebuild the knowledge base index to fix this.";
+
+  const [chunksStat, embeddingsStat] = await Promise.all([
+    fs.stat(chunksPath).catch(() => null),
+    fs.stat(embeddingsPath).catch(() => null),
+  ]);
+
+  if (!chunksStat || !embeddingsStat) {
+    throw new Error(
+      `Knowledge base index is missing chunks.jsonl or embeddings.bin, ` +
+        `but the manifest expects existing content. ${REPAIR_HINT}`,
+    );
+  }
+
+  if (dimensions > 0 && embeddingsStat.size % (dimensions * 4) !== 0) {
+    throw new Error(
+      `Knowledge base index is corrupted: embeddings.bin's size ` +
+        `(${embeddingsStat.size} bytes) isn't a whole multiple of the ` +
+        `embedding row size (${dimensions * 4} bytes). ${REPAIR_HINT}`,
+    );
+  }
+
+  const actualRowCount = dimensions > 0 ? embeddingsStat.size / (dimensions * 4) : 0;
+  if (actualRowCount !== expectedChunkCount) {
+    throw new Error(
+      `Knowledge base index is corrupted: embeddings.bin has ` +
+        `${actualRowCount} rows but the manifest expects ` +
+        `${expectedChunkCount}. ${REPAIR_HINT}`,
+    );
+  }
+
+  if (chunksStat.size > 0) {
+    const lastByte = Buffer.alloc(1);
+    const handle = await fs.open(chunksPath, "r");
+    try {
+      await handle.read(lastByte, 0, 1, chunksStat.size - 1);
+    } finally {
+      await handle.close();
+    }
+    if (lastByte[0] !== 0x0a /* "\n" */) {
+      throw new Error(
+        `Knowledge base index is corrupted: chunks.jsonl does not end ` +
+          `with a newline. ${REPAIR_HINT}`,
+      );
+    }
+  }
 }
 
 /**
@@ -373,7 +647,11 @@ async function extractAndChunkSource(
  * instead of re-extracting and re-embedding the whole corpus. Embedding is
  * CPU-bound and runs on the main thread, so cost must scale with what
  * changed, not with total corpus size — otherwise every upload/delete on a
- * large knowledge base blocks the server for minutes.
+ * large knowledge base blocks the server for minutes. This now holds at
+ * the disk-I/O level too: both index files are appended to directly
+ * rather than fully read and rewritten, since chunks.jsonl always ends in
+ * a newline and embedding rows are fixed-width — no read of existing
+ * content is needed to safely add more.
  */
 async function appendSourcesToIndex(
   projectDir: string,
@@ -383,65 +661,79 @@ async function appendSourcesToIndex(
   const chunksPath = path.join(indexDir, CHUNKS_FILE);
   const embeddingsPath = path.join(indexDir, EMBEDDINGS_FILE);
 
-  const existingChunks = await readJsonLines<AiChunkRecord>(chunksPath);
-  const existingEmbeddings = await readEmbeddingMatrix(embeddingsPath);
   const manifest = await readManifest(projectDir);
-  const dimensions = manifest.embeddingDimensions ?? 0;
+  const existingDimensions = manifest.embeddingDimensions ?? 0;
+  const existingChunkCount = manifest.index.chunkCount;
+
+  if (existingChunkCount > 0) {
+    await assertIndexIntegrity(
+      chunksPath,
+      embeddingsPath,
+      existingDimensions,
+      existingChunkCount,
+    );
+  }
 
   const newRecords: AiChunkRecord[] = [];
   const newTexts: string[] = [];
   const pageCounts = new Map<string, number | null>();
+  const metadataById = new Map<string, AiSourceMetadata>();
 
   for (const source of newSources) {
-    const { records, texts, pageCount } = await extractAndChunkSource(
+    const { records, texts, pageCount, metadata } = await extractAndChunkSource(
       projectDir,
       source,
     );
     newRecords.push(...records);
     newTexts.push(...texts);
     pageCounts.set(source.id, pageCount);
+    metadataById.set(source.id, metadata);
   }
 
   const newVectors = await embedTexts(newTexts);
-  const newDimensions = newVectors[0]?.length ?? dimensions;
+  const dimensions = newVectors[0]?.length ?? existingDimensions;
 
-  const combinedChunks = [...existingChunks, ...newRecords];
-  await writeJsonLines(chunksPath, combinedChunks);
-
-  const combinedVectorCount =
-    existingChunks.length + newVectors.length;
-  const buffer = Buffer.alloc(combinedVectorCount * newDimensions * 4);
-  const view = new Float32Array(
-    buffer.buffer,
-    buffer.byteOffset,
-    combinedVectorCount * newDimensions,
-  );
-  view.set(existingEmbeddings.subarray(0, existingChunks.length * newDimensions));
-  let offset = existingChunks.length * newDimensions;
-  for (const vector of newVectors) {
-    view.set(vector, offset);
-    offset += newDimensions;
+  if (newRecords.length > 0) {
+    const chunkLines = `${newRecords.map((record) => JSON.stringify(record)).join("\n")}\n`;
+    await fs.appendFile(chunksPath, chunkLines, "utf8");
   }
-  await fs.writeFile(embeddingsPath, buffer);
+
+  if (newVectors.length > 0) {
+    const buffer = Buffer.alloc(newVectors.length * dimensions * 4);
+    const view = new Float32Array(
+      buffer.buffer,
+      buffer.byteOffset,
+      newVectors.length * dimensions,
+    );
+    let offset = 0;
+    for (const vector of newVectors) {
+      view.set(vector, offset);
+      offset += dimensions;
+    }
+    await fs.appendFile(embeddingsPath, buffer);
+  }
 
   await writeManifest(projectDir, {
     version: 1,
     updatedAt: nowIso(),
     embeddingModel: EMBEDDING_MODEL,
-    embeddingDimensions: newDimensions || dimensions || null,
+    embeddingDimensions: dimensions || existingDimensions || null,
     sources: [
       ...manifest.sources,
       ...newSources.map((source) => ({
         ...source,
         pageCount: pageCounts.get(source.id) ?? source.pageCount,
+        metadata: metadataById.get(source.id) ?? source.metadata,
       })),
     ],
     index: {
-      chunkCount: combinedChunks.length,
-      embeddingCount: combinedVectorCount,
+      chunkCount: existingChunkCount + newRecords.length,
+      embeddingCount: manifest.index.embeddingCount + newVectors.length,
       generatedAt: nowIso(),
     },
   });
+
+  invalidateKbCache(indexDir);
 }
 
 /**
@@ -501,6 +793,8 @@ async function removeSourceFromIndex(
       generatedAt: nowIso(),
     },
   });
+
+  invalidateKbCache(indexDir);
 }
 
 export interface RejectedSourceFile {
@@ -583,6 +877,77 @@ export async function deleteAiSource(
   return readManifest(projectDir);
 }
 
+/**
+ * Saves the AI's own synthesized understanding as a "note" source — kind
+ * "note", flowing through the exact same extract/chunk/embed/search path as
+ * any uploaded source, so it's findable via search_knowledge_base and
+ * listable via browse_knowledge_base like anything else. What makes it
+ * fundamentally different from a real upload is enforced elsewhere, not
+ * here: verifyAiCitation refuses to resolve a citation against kind ===
+ * "note", so a note can never become a cite() target no matter what this
+ * function writes into it.
+ *
+ * originalName is set to the raw title text, not run through the upload
+ * path's sanitizeFileName — there's no untrusted filename here to sanitize
+ * (the model supplies a title, not a file), and sanitizing would mangle
+ * natural-language titles with underscores for no benefit.
+ */
+export async function saveResearchNote(params: {
+  projectDir: string;
+  title: string;
+  content: string;
+  drawsOnSourceIds?: string[];
+  noteId?: string;
+}): Promise<AiSourceRecord> {
+  const title = params.title.trim();
+  const content = params.content.trim();
+  if (!title) throw new Error("Note title is required");
+  if (!content) throw new Error("Note content is required");
+
+  const { sourcesDir } = await ensureAiWorkspace(params.projectDir);
+
+  let existing: AiSourceRecord | null = null;
+  if (params.noteId) {
+    existing = await getAiSourceRecord(params.projectDir, params.noteId);
+    if (!existing) {
+      throw new Error("Note not found");
+    }
+    if (existing.kind !== "note") {
+      throw new Error(
+        `"${existing.originalName}" is not a research note — noteId must refer to a note you saved earlier.`,
+      );
+    }
+  }
+
+  const id = existing?.id ?? crypto.randomUUID();
+  const storedName = `${id}.md`;
+  const relativePath = posixJoin(".openlatex", "ai", "sources", storedName);
+  const bytes = Buffer.from(content, "utf8");
+  await fs.writeFile(path.join(sourcesDir, storedName), bytes);
+
+  const record: AiSourceRecord = {
+    id,
+    originalName: title,
+    storedName,
+    relativePath,
+    kind: "note",
+    bytes: bytes.byteLength,
+    ingestedAt: existing?.ingestedAt ?? nowIso(),
+    updatedAt: nowIso(),
+    drawsOnSourceIds:
+      params.drawsOnSourceIds && params.drawsOnSourceIds.length > 0
+        ? params.drawsOnSourceIds
+        : undefined,
+  };
+
+  if (existing) {
+    await removeSourceFromIndex(params.projectDir, id);
+  }
+  await appendSourcesToIndex(params.projectDir, [record]);
+
+  return record;
+}
+
 export async function rebuildAiIndex(
   projectDir: string,
   sourceRecords?: AiSourceRecord[],
@@ -595,6 +960,7 @@ export async function rebuildAiIndex(
 
   const chunkRecords: AiChunkRecord[] = [];
   const chunkTexts: string[] = [];
+  const metadataById = new Map<string, AiSourceMetadata>();
 
   for (const source of sources) {
     const sourcePath = path.join(
@@ -609,6 +975,7 @@ export async function rebuildAiIndex(
       source.originalName,
       new Uint8Array(bytes),
     );
+    metadataById.set(source.id, extracted.metadata);
 
     for (const page of extracted.pages) {
       const pageChunks = chunkText(page.text);
@@ -644,6 +1011,7 @@ export async function rebuildAiIndex(
     sources: sources.map((source) => ({
       ...source,
       updatedAt: nowIso(),
+      metadata: metadataById.get(source.id) ?? source.metadata,
     })),
     index: {
       chunkCount: chunkRecords.length,
@@ -653,6 +1021,15 @@ export async function rebuildAiIndex(
   };
 }
 
+/**
+ * Hybrid search: ranks chunks two ways — semantically (embedding cosine/dot
+ * similarity, via the same query embedded once) and lexically (BM25 keyword
+ * match) — then fuses the two rankings with Reciprocal Rank Fusion. Semantic
+ * search is strong on "what is this about" but weak on exact tokens it was
+ * never trained to weight specially (acronyms, author names, model names);
+ * BM25 is the opposite. Fusing catches what either would miss alone — see
+ * lib/ai/lexical-search.ts for the full reasoning.
+ */
 export async function searchAiKnowledgeBase(
   projectDir: string,
   query: string,
@@ -665,12 +1042,7 @@ export async function searchAiKnowledgeBase(
   }
 
   const { indexDir } = await ensureAiWorkspace(projectDir);
-  const chunkRecords = await readJsonLines<AiChunkRecord>(
-    path.join(indexDir, CHUNKS_FILE),
-  );
-  const embeddingMatrix = await readEmbeddingMatrix(
-    path.join(indexDir, EMBEDDINGS_FILE),
-  );
+  const { chunkRecords, embeddingMatrix, bm25Index } = await getKbIndex(indexDir);
 
   if (chunkRecords.length === 0 || embeddingMatrix.length === 0) {
     return [];
@@ -684,27 +1056,57 @@ export async function searchAiKnowledgeBase(
   // search_knowledge_base searched the whole corpus regardless.
   const allowedSourceIds = sourceIds && sourceIds.length > 0 ? new Set(sourceIds) : null;
 
+  const chunkById = new Map<string, AiChunkRecord>();
+  for (const chunk of chunkRecords) chunkById.set(chunk.id, chunk);
+
   const dimensions = manifest.embeddingDimensions;
   const queryVector = (await embedTexts([query]))[0];
   if (!queryVector) return [];
-
   const queryEmbedding = new Float32Array(queryVector);
-  const scored: AiSearchHit[] = [];
 
+  const semanticScored: Array<{ id: string; score: number }> = [];
   for (let index = 0; index < chunkRecords.length; index += 1) {
     const chunk = chunkRecords[index];
     if (allowedSourceIds && !allowedSourceIds.has(chunk.sourceId)) continue;
 
     const start = index * dimensions;
     const end = start + dimensions;
-    const chunkEmbedding = embeddingMatrix.slice(start, end);
-    scored.push({
-      score: cosineSimilarity(queryEmbedding, chunkEmbedding),
-      chunk,
-    });
+    // subarray, not slice — a zero-copy view is all dotProduct needs (it only
+    // reads), and slice's per-chunk allocation+copy was the dominant cost of
+    // this loop at scale (40k chunks meant 40k allocations on every search).
+    const chunkEmbedding = embeddingMatrix.subarray(start, end);
+    semanticScored.push({ id: chunk.id, score: dotProduct(queryEmbedding, chunkEmbedding) });
   }
+  semanticScored.sort((left, right) => right.score - left.score);
 
-  return scored.sort((left, right) => right.score - left.score).slice(0, topK);
+  const lexicalScores = scoreBm25(bm25Index, tokenize(query));
+  const lexicalScored: Array<{ id: string; score: number }> = [];
+  for (const [id, score] of lexicalScores) {
+    const chunk = chunkById.get(id);
+    if (!chunk) continue;
+    if (allowedSourceIds && !allowedSourceIds.has(chunk.sourceId)) continue;
+    lexicalScored.push({ id, score });
+  }
+  lexicalScored.sort((left, right) => right.score - left.score);
+
+  const fused = reciprocalRankFusion([
+    semanticScored.map((s) => s.id),
+    lexicalScored.map((s) => s.id),
+  ]);
+
+  const fusedIds = [...fused.entries()]
+    .sort((left, right) => right[1] - left[1])
+    .slice(0, topK)
+    .map(([id]) => id);
+
+  // Report the fused RRF score, not raw cosine similarity — it's what
+  // actually determined this ordering, and a lexical-only hit (found by
+  // BM25 but never scored semantically) has no meaningful cosine score to
+  // fall back to.
+  return fusedIds.map((id) => ({
+    score: fused.get(id) ?? 0,
+    chunk: chunkById.get(id) as AiChunkRecord,
+  }));
 }
 
 export async function getAiSourceRecord(
@@ -814,6 +1216,20 @@ export async function verifyAiCitation(params: {
     params.sourceId,
     params.page,
   );
+
+  // The whole point of cite() is verifying a quote against a real, primary
+  // source — a research note is the AI's own prior synthesis, not primary
+  // evidence, so it must never satisfy this gate even if the quote text
+  // technically matches. Keyed off source.kind (authoritative, via the
+  // manifest) rather than some future denormalized per-chunk field — a
+  // convenience shortcut like that could trust stale data from chunks
+  // written before this guard existed and silently reopen the hole.
+  if (source.kind === "note") {
+    throw new Error(
+      `"${source.originalName}" is an AI-authored research note, not a primary source — cite() only verifies quotes against uploaded primary sources. Cite the primary source(s) this note draws on instead.`,
+    );
+  }
+
   const normalizedQuote = normalizeWhitespace(params.quote);
   const normalizedText = normalizeWhitespace(text);
 

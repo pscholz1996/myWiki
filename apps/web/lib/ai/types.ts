@@ -71,7 +71,21 @@ export interface AiConversationSummary {
   usage?: AiUsage;
 }
 
-export type AiSourceKind = "pdf" | "markdown" | "text";
+export type AiSourceKind = "pdf" | "markdown" | "text" | "note";
+
+export interface AiSourceMetadata {
+  title?: string;
+  authors?: string[];
+  year?: string;
+  /**
+   * "pdf-metadata" means every field here came from the PDF's own embedded
+   * metadata dictionary — trustworthy enough to auto-fill a BibTeX entry.
+   * "heuristic" means it's a rough guess (currently: title only, from the
+   * first ~150 characters of page 1) — good for a human to skim in a
+   * source list, never trustworthy enough to silently feed into a citation.
+   */
+  provenance: "pdf-metadata" | "heuristic";
+}
 
 export interface AiSourceRecord {
   id: string;
@@ -90,6 +104,15 @@ export interface AiSourceRecord {
    * a duplicate .bib entry every time.
    */
   bibKey?: string;
+  /** Best-effort bibliographic metadata captured at ingestion time — see AiSourceMetadata. */
+  metadata?: AiSourceMetadata;
+  /**
+   * Primary-source ids a research note (kind "note") drew on when the AI
+   * wrote it — informational/traceability only. Never used to satisfy
+   * cite(): a note can never be a citation target regardless of what it
+   * claims to draw on (see verifyAiCitation's kind === "note" guard).
+   */
+  drawsOnSourceIds?: string[];
 }
 
 export interface AiManifest {
