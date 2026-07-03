@@ -2,7 +2,12 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
-import { ChevronDownIcon, FolderIcon, FolderOpenIcon } from "lucide-react";
+import {
+  ChevronDownIcon,
+  FolderIcon,
+  FolderOpenIcon,
+  FolderPlusIcon,
+} from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -13,6 +18,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { DirectoryBrowserModal } from "./directory-browser-modal";
+import { NewProjectDialog } from "./new-project-dialog";
 import { basename } from "@/lib/project/path-utils";
 
 interface Props {
@@ -38,6 +44,7 @@ async function switchTo(path: string): Promise<void> {
 
 export function ProjectSwitcherButton({ current, recent }: Props) {
   const [browseOpen, setBrowseOpen] = useState(false);
+  const [newProjectOpen, setNewProjectOpen] = useState(false);
   const [switching, setSwitching] = useState(false);
   const others = recent.filter((p) => p !== current);
 
@@ -100,6 +107,9 @@ export function ProjectSwitcherButton({ current, recent }: Props) {
           <DropdownMenuItem onSelect={() => setBrowseOpen(true)}>
             <FolderOpenIcon className="mr-2 size-4" /> Browse other folder…
           </DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => setNewProjectOpen(true)}>
+            <FolderPlusIcon className="mr-2 size-4" /> New project…
+          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
 
@@ -110,6 +120,11 @@ export function ProjectSwitcherButton({ current, recent }: Props) {
           setBrowseOpen(false);
           void onPick(p);
         }}
+      />
+
+      <NewProjectDialog
+        open={newProjectOpen}
+        onClose={() => setNewProjectOpen(false)}
       />
     </>
   );

@@ -37,9 +37,17 @@ interface Props {
   open: boolean;
   onClose: () => void;
   onSelect: (path: string) => void;
+  title?: string;
+  selectLabel?: string;
 }
 
-export function DirectoryBrowserModal({ open, onClose, onSelect }: Props) {
+export function DirectoryBrowserModal({
+  open,
+  onClose,
+  onSelect,
+  title = "Open folder",
+  selectLabel = "Open this folder",
+}: Props) {
   const [currentPath, setCurrentPath] = useState<string | null>(null);
   const [parent, setParent] = useState<string | null>(null);
   const [entries, setEntries] = useState<Entry[]>([]);
@@ -201,7 +209,7 @@ export function DirectoryBrowserModal({ open, onClose, onSelect }: Props) {
     >
       <DialogContent className="max-w-xl">
         <DialogHeader>
-          <DialogTitle>Open folder</DialogTitle>
+          <DialogTitle>{title}</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-3">
@@ -310,7 +318,7 @@ export function DirectoryBrowserModal({ open, onClose, onSelect }: Props) {
             Cancel
           </Button>
           <Button disabled={!canSelect} onClick={() => onSelect(currentPath!)}>
-            Open this folder
+            {selectLabel}
           </Button>
         </DialogFooter>
       </DialogContent>

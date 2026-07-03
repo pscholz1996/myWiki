@@ -2,11 +2,12 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
-import { FolderOpenIcon, FolderIcon } from "lucide-react";
+import { FolderOpenIcon, FolderIcon, FolderPlusIcon } from "lucide-react";
 import { SiGithub } from "@icons-pack/react-simple-icons";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { DirectoryBrowserModal } from "./directory-browser-modal";
+import { NewProjectDialog } from "./new-project-dialog";
 import { basename } from "@/lib/project/path-utils";
 import packageJson from "@/package.json";
 
@@ -34,6 +35,7 @@ export function WelcomeScreen({ recent }: WelcomeScreenProps) {
   const [input, setInput] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [browseOpen, setBrowseOpen] = useState(false);
+  const [newProjectOpen, setNewProjectOpen] = useState(false);
 
   const onOpen = async (p: string) => {
     if (!p.trim()) return;
@@ -89,6 +91,22 @@ export function WelcomeScreen({ recent }: WelcomeScreenProps) {
             </Button>
           </form>
 
+          <div className="flex items-center gap-3">
+            <div className="h-px flex-1 bg-border" />
+            <span className="text-muted-foreground text-xs">or</span>
+            <div className="h-px flex-1 bg-border" />
+          </div>
+
+          <Button
+            type="button"
+            variant="secondary"
+            className="w-full"
+            onClick={() => setNewProjectOpen(true)}
+            disabled={submitting}
+          >
+            <FolderPlusIcon className="size-4" /> New project
+          </Button>
+
           {recent.length > 0 && (
             <div className="space-y-2">
               <h2 className="font-medium text-muted-foreground text-sm">
@@ -141,6 +159,11 @@ export function WelcomeScreen({ recent }: WelcomeScreenProps) {
           setBrowseOpen(false);
           void onOpen(p);
         }}
+      />
+
+      <NewProjectDialog
+        open={newProjectOpen}
+        onClose={() => setNewProjectOpen(false)}
       />
     </>
   );
