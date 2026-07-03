@@ -22,6 +22,27 @@ interface Props {
   onDelete: () => void;
   deleteDisabled: boolean;
   onSaveMetadata: (updates: MetadataEdits) => Promise<void>;
+  /** When set, the row's checkbox selects for a bulk action instead of chat scope. */
+  bulkMode?: boolean;
+  bulkSelected?: boolean;
+  onToggleBulkSelected?: () => void;
+}
+
+// A source "needs review" when part or all of its bibliographic metadata
+// is still an unverified guess — never trustworthy enough to auto-fill a
+// citation (see ensureBibtexEntry's per-field gate), so worth a human
+// glance. Notes are the AI's own synthesis, not bibliographic data, so
+// they're never flagged. Exported so the source list (ai-panel.tsx) can
+// filter/count by the same definition used for the row's own indicator.
+export function sourceNeedsReview(source: AiSourceRecord): boolean {
+  if (source.kind === "note") return false;
+  const metadata = source.metadata;
+  if (!metadata) return true;
+  return (
+    metadata.provenance === "heuristic" ||
+    Boolean(metadata.titleIsHeuristic) ||
+    Boolean(metadata.authorsAreHeuristic)
+  );
 }
 
 function DetailRow({
@@ -75,6 +96,9 @@ export function SourceListItem({
   onDelete,
   deleteDisabled,
   onSaveMetadata,
+  bulkMode,
+  bulkSelected,
+  onToggleBulkSelected,
 }: Props) {
   const [expanded, setExpanded] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -84,6 +108,7 @@ export function SourceListItem({
   const [draftAuthors, setDraftAuthors] = useState("");
   const [draftYear, setDraftYear] = useState("");
   const metadata = source.metadata;
+  const needsReview = sourceNeedsReview(source);
 
   // A research note's "metadata" isn't bibliographic data to correct — it's
   // just the AI's own title/content — so the edit affordance only makes
@@ -135,9 +160,15 @@ export function SourceListItem({
         <div className="flex min-w-0 flex-1 items-start gap-2">
           <Checkbox
             className="mt-0.5"
-            checked={selected}
-            onCheckedChange={onToggleSelected}
-            aria-label={`Scope chat to ${source.originalName}`}
+            checked={bulkMode ? Boolean(bulkSelected) : selected}
+            onCheckedChange={() =>
+              bulkMode ? onToggleBulkSelected?.() : onToggleSelected()
+            }
+            aria-label={
+              bulkMode
+                ? `Select ${source.originalName} for bulk actions`
+                : `Scope chat to ${source.originalName}`
+            }
           />
           <a
             href={`/api/ai/sources/${source.id}/file`}
@@ -151,6 +182,12 @@ export function SourceListItem({
               <div className="truncate font-medium text-sm hover:underline">
                 {metadata?.title ?? source.originalName}
               </div>
+              {needsReview ? (
+                <span
+                  className="size-1.5 shrink-0 rounded-full bg-amber-500"
+                  title="Needs review — some metadata is an unverified guess"
+                />
+              ) : null}
             </div>
             {(metadata?.authors?.length || metadata?.year) && (
               <div className="mt-0.5 truncate text-muted-foreground text-xs">

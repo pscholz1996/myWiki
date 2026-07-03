@@ -16,7 +16,7 @@ import {
   tokenize,
   type Bm25Index,
 } from "@/lib/ai/lexical-search";
-import { lookupCrossrefMetadata } from "@/lib/ai/crossref";
+import { lookupCrossrefMetadata, titleSimilarity } from "@/lib/ai/crossref";
 
 export type {
   AiManifest,
@@ -957,11 +957,38 @@ async function assertIndexIntegrity(
  * a newline and embedding rows are fixed-width — no read of existing
  * content is needed to safely add more.
  */
+// Below this, a "similar" title is more likely two genuinely different
+// papers on the same topic than the same paper uploaded twice — kept
+// conservative to avoid nagging about legitimate uploads, matching the
+// same reasoning as CrossRef's own confidence threshold.
+const NEAR_DUPLICATE_TITLE_SIMILARITY = 0.82;
+
+// Only checked against sources already in the knowledge base before this
+// upload started — a second near-duplicate within the same multi-file
+// upload batch isn't caught, a reasonable scope limit rather than tracking
+// in-flight metadata across the batch for a rare case.
+function findNearDuplicateTitle(
+  title: string,
+  existingSources: AiSourceRecord[],
+): AiSourceRecord | undefined {
+  let best: AiSourceRecord | undefined;
+  let bestScore = 0;
+  for (const candidate of existingSources) {
+    if (!candidate.metadata?.title) continue;
+    const score = titleSimilarity(title, candidate.metadata.title);
+    if (score > bestScore) {
+      bestScore = score;
+      best = candidate;
+    }
+  }
+  return bestScore >= NEAR_DUPLICATE_TITLE_SIMILARITY ? best : undefined;
+}
+
 async function appendSourcesToIndex(
   projectDir: string,
   newSources: AiSourceRecord[],
   onProgress?: AiUploadProgressCallback,
-): Promise<void> {
+): Promise<UploadWarning[]> {
   const { indexDir } = await ensureAiWorkspace(projectDir);
   const chunksPath = path.join(indexDir, CHUNKS_FILE);
   const embeddingsPath = path.join(indexDir, EMBEDDINGS_FILE);
@@ -983,6 +1010,7 @@ async function appendSourcesToIndex(
   const newTexts: string[] = [];
   const pageCounts = new Map<string, number | null>();
   const metadataById = new Map<string, AiSourceMetadata>();
+  const warnings: UploadWarning[] = [];
 
   for (const [index, source] of newSources.entries()) {
     onProgress?.({
@@ -1011,7 +1039,18 @@ async function appendSourcesToIndex(
         fileIndex: index,
         fileCount: newSources.length,
       });
-      metadataById.set(source.id, await enrichMetadataWithCrossref(metadata));
+      const enriched = await enrichMetadataWithCrossref(metadata);
+      metadataById.set(source.id, enriched);
+
+      if (enriched.title) {
+        const similar = findNearDuplicateTitle(enriched.title, manifest.sources);
+        if (similar) {
+          warnings.push({
+            name: source.originalName,
+            reason: `Looks similar to an existing source, "${similar.metadata?.title ?? similar.originalName}" — check it isn't a duplicate.`,
+          });
+        }
+      }
     } else {
       metadataById.set(source.id, metadata);
     }
@@ -1064,6 +1103,7 @@ async function appendSourcesToIndex(
   });
 
   invalidateKbCache(indexDir);
+  return warnings;
 }
 
 /**
@@ -1071,10 +1111,16 @@ async function appendSourcesToIndex(
  * existing arrays — no re-embedding required, since nothing about the
  * remaining sources changed.
  */
-async function removeSourceFromIndex(
+// Accepts multiple ids so a bulk delete does one read-modify-write of the
+// index instead of N — deletes are still a full rewrite either way (see
+// appendSourcesToIndex's comment on why appends are incremental but
+// deletes aren't), but N full rewrites for one bulk action is exactly the
+// wasted-I/O case that was worth avoiding.
+async function removeSourcesFromIndex(
   projectDir: string,
-  sourceId: string,
+  sourceIds: string[],
 ): Promise<void> {
+  const idsToRemove = new Set(sourceIds);
   const { indexDir } = await ensureAiWorkspace(projectDir);
   const chunksPath = path.join(indexDir, CHUNKS_FILE);
   const embeddingsPath = path.join(indexDir, EMBEDDINGS_FILE);
@@ -1088,7 +1134,7 @@ async function removeSourceFromIndex(
   const keptVectors: Float32Array[] = [];
 
   existingChunks.forEach((chunk, index) => {
-    if (chunk.sourceId === sourceId) return;
+    if (idsToRemove.has(chunk.sourceId)) return;
     keptChunks.push(chunk);
     if (dimensions > 0) {
       const start = index * dimensions;
@@ -1116,7 +1162,7 @@ async function removeSourceFromIndex(
     updatedAt: nowIso(),
     embeddingModel: EMBEDDING_MODEL,
     embeddingDimensions: dimensions || null,
-    sources: manifest.sources.filter((source) => source.id !== sourceId),
+    sources: manifest.sources.filter((source) => !idsToRemove.has(source.id)),
     index: {
       chunkCount: keptChunks.length,
       embeddingCount: keptVectors.length,
@@ -1132,9 +1178,20 @@ export interface RejectedSourceFile {
   reason: string;
 }
 
+export interface UploadWarning {
+  name: string;
+  reason: string;
+}
+
 export interface UploadAiSourcesResult {
   manifest: AiManifest;
   rejected: RejectedSourceFile[];
+  warnings: UploadWarning[];
+}
+
+async function hashBytes(bytes: Uint8Array): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", bytes as BufferSource);
+  return Buffer.from(digest).toString("hex");
 }
 
 export async function uploadAiSources(
@@ -1144,6 +1201,16 @@ export async function uploadAiSources(
 ): Promise<UploadAiSourcesResult> {
   const { sourcesDir, indexDir } = await ensureAiWorkspace(projectDir);
   await fs.mkdir(indexDir, { recursive: true });
+
+  // hash -> name of the source it matches, seeded from what's already in
+  // the knowledge base and grown as this batch is processed so two copies
+  // of the same file in one upload are caught too, not just re-uploads of
+  // an existing source.
+  const existingManifest = await readManifest(projectDir);
+  const knownHashes = new Map<string, string>();
+  for (const source of existingManifest.sources) {
+    if (source.contentHash) knownHashes.set(source.contentHash, source.originalName);
+  }
 
   const newSources: AiSourceRecord[] = [];
   const rejected: RejectedSourceFile[] = [];
@@ -1168,6 +1235,18 @@ export async function uploadAiSources(
       continue;
     }
 
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const contentHash = await hashBytes(bytes);
+    const duplicateOf = knownHashes.get(contentHash);
+    if (duplicateOf) {
+      rejected.push({
+        name: originalName,
+        reason: `Identical to an already-uploaded source ("${duplicateOf}") — skipped`,
+      });
+      continue;
+    }
+    knownHashes.set(contentHash, originalName);
+
     onProgress?.({
       stage: "saving",
       fileName: originalName,
@@ -1175,7 +1254,6 @@ export async function uploadAiSources(
       fileCount: files.length,
     });
     const id = crypto.randomUUID();
-    const bytes = new Uint8Array(await file.arrayBuffer());
     const saved = await saveSourceFile(sourcesDir, id, originalName, bytes);
 
     newSources.push({
@@ -1185,32 +1263,49 @@ export async function uploadAiSources(
       relativePath: saved.relativePath,
       kind: ext === ".pdf" ? "pdf" : ext === ".md" ? "markdown" : "text",
       bytes: file.size,
+      contentHash,
       ingestedAt: nowIso(),
       updatedAt: nowIso(),
     });
   }
 
+  let warnings: UploadWarning[] = [];
   if (newSources.length > 0) {
-    await appendSourcesToIndex(projectDir, newSources, onProgress);
+    warnings = await appendSourcesToIndex(projectDir, newSources, onProgress);
   }
 
-  return { manifest: await readManifest(projectDir), rejected };
+  return { manifest: await readManifest(projectDir), rejected, warnings };
 }
 
 export async function deleteAiSource(
   projectDir: string,
   sourceId: string,
 ): Promise<AiManifest> {
+  return deleteAiSources(projectDir, [sourceId]);
+}
+
+export async function deleteAiSources(
+  projectDir: string,
+  sourceIds: string[],
+): Promise<AiManifest> {
   const { sourcesDir } = await ensureAiWorkspace(projectDir);
   const manifest = await readManifest(projectDir);
-  const removed = manifest.sources.find((source) => source.id === sourceId);
+  const idSet = new Set(sourceIds);
+  const removed = manifest.sources.filter((source) => idSet.has(source.id));
 
-  if (!removed) {
+  if (removed.length === 0) {
     throw new Error("Source not found");
   }
 
-  await fs.rm(path.join(sourcesDir, removed.storedName), { force: true });
-  await removeSourceFromIndex(projectDir, sourceId);
+  await Promise.all(
+    removed.map((source) =>
+      fs.rm(path.join(sourcesDir, source.storedName), { force: true }),
+    ),
+  );
+  await removeSourcesFromIndex(
+    projectDir,
+    removed.map((source) => source.id),
+  );
   return readManifest(projectDir);
 }
 
@@ -1278,7 +1373,7 @@ export async function saveResearchNote(params: {
   };
 
   if (existing) {
-    await removeSourceFromIndex(params.projectDir, id);
+    await removeSourcesFromIndex(params.projectDir, [id]);
   }
   await appendSourcesToIndex(params.projectDir, [record]);
 

@@ -45,9 +45,16 @@ interface MockCrossrefMetadata {
 const lookupCrossrefMetadataMock = vi.fn<
   (title: string) => Promise<MockCrossrefMetadata | undefined>
 >(async () => undefined);
-vi.mock("./crossref", () => ({
-  lookupCrossrefMetadata: (title: string) => lookupCrossrefMetadataMock(title),
-}));
+// titleSimilarity is real (not mocked) — knowledge-base.ts also uses it for
+// near-duplicate-title detection at upload time, and that logic is worth
+// exercising against the actual scoring function, not a stand-in.
+vi.mock("./crossref", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./crossref")>();
+  return {
+    ...actual,
+    lookupCrossrefMetadata: (title: string) => lookupCrossrefMetadataMock(title),
+  };
+});
 
 import {
   chunkText,
@@ -63,6 +70,7 @@ import {
   heuristicTitleFromText,
   saveResearchNote,
   updateAiSourceMetadata,
+  deleteAiSources,
   type AiManifest,
   type AiSourceRecord,
 } from "./knowledge-base";
@@ -882,5 +890,120 @@ describe("updateAiSourceMetadata — the manual-edit gate", () => {
         year: "",
       }),
     ).rejects.toThrow("Source not found");
+  });
+});
+
+describe("deleteAiSources — bulk delete", () => {
+  test("removes multiple sources' chunks, embeddings, and manifest entries in one call", async () => {
+    await uploadAiSources(projectDir, [
+      textFile("alpha.txt", "Alpha paper about quantum entanglement."),
+      textFile("beta.txt", "Beta paper about neural network pruning."),
+    ]);
+
+    const before = await listAiSources(projectDir);
+    const uploaded = before.sources.filter((s) => s.id !== SOURCE.id);
+    expect(uploaded).toHaveLength(2);
+
+    const result = await deleteAiSources(
+      projectDir,
+      uploaded.map((s) => s.id),
+    );
+    expect(result.sources.map((s) => s.id)).toEqual([SOURCE.id]);
+    expect(result.index.chunkCount).toBe(0);
+    expect(result.index.embeddingCount).toBe(0);
+
+    const hits = await searchAiKnowledgeBase(projectDir, "quantum entanglement", 5);
+    expect(hits.every((hit) => hit.chunk.sourceId !== uploaded[0].id)).toBe(true);
+  });
+
+  test("throws when none of the given ids exist", async () => {
+    await expect(deleteAiSources(projectDir, ["nope"])).rejects.toThrow(
+      "Source not found",
+    );
+  });
+});
+
+describe("uploadAiSources — duplicate detection", () => {
+  test("rejects a byte-identical re-upload of an existing source", async () => {
+    const content = "The exact same text, byte for byte.";
+    await uploadAiSources(projectDir, [textFile("first.txt", content)]);
+
+    const { manifest, rejected } = await uploadAiSources(projectDir, [
+      textFile("first-copy.txt", content),
+    ]);
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0].reason).toContain("Identical to an already-uploaded source");
+    expect(manifest.sources.some((s) => s.originalName === "first-copy.txt")).toBe(
+      false,
+    );
+  });
+
+  test("rejects two byte-identical files uploaded in the same batch", async () => {
+    const content = "Same bytes, uploaded together.";
+    const { rejected, manifest } = await uploadAiSources(projectDir, [
+      textFile("a.txt", content),
+      textFile("b.txt", content),
+    ]);
+    expect(rejected).toHaveLength(1);
+    expect(
+      manifest.sources.filter(
+        (s) => s.originalName === "a.txt" || s.originalName === "b.txt",
+      ),
+    ).toHaveLength(1);
+  });
+
+  test("warns but still uploads when a new PDF's title closely matches an existing source", async () => {
+    const existingPdf = buildPdfWithMetadata({
+      title: "A Study of Model-Based Systems Engineering Adoption",
+      author: "Jane Doe",
+      creationDate: "D:20200101120000+00'00'",
+    });
+    await uploadAiSources(projectDir, [
+      new File([new Uint8Array(existingPdf)], "existing.pdf", {
+        type: "application/pdf",
+      }),
+    ]);
+
+    // Same words, just the hyphen swapped for a space — a real re-submission
+    // of the same paper would very plausibly differ this little.
+    const nearDuplicatePdf = buildPdfWithMetadata({
+      title: "A Study of Model Based Systems Engineering Adoption",
+      author: "Jane Doe",
+      creationDate: "D:20200101120000+00'00'",
+    });
+    const { warnings, manifest } = await uploadAiSources(projectDir, [
+      new File([new Uint8Array(nearDuplicatePdf)], "resubmission.pdf", {
+        type: "application/pdf",
+      }),
+    ]);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0].reason).toContain(
+      "A Study of Model-Based Systems Engineering Adoption",
+    );
+    // A warning is informational, not a rejection — the file is still indexed.
+    expect(manifest.sources.some((s) => s.originalName === "resubmission.pdf")).toBe(
+      true,
+    );
+  });
+
+  test("does not warn when titles are genuinely different", async () => {
+    const pdfA = buildPdfWithMetadata({
+      title: "Quantum Entanglement in Cold Atom Systems",
+      author: "A",
+      creationDate: "D:20200101120000+00'00'",
+    });
+    await uploadAiSources(projectDir, [
+      new File([new Uint8Array(pdfA)], "a.pdf", { type: "application/pdf" }),
+    ]);
+
+    const pdfB = buildPdfWithMetadata({
+      title: "A Recipe for Sourdough Bread",
+      author: "B",
+      creationDate: "D:20200101120000+00'00'",
+    });
+    const { warnings } = await uploadAiSources(projectDir, [
+      new File([new Uint8Array(pdfB)], "b.pdf", { type: "application/pdf" }),
+    ]);
+    expect(warnings).toHaveLength(0);
   });
 });

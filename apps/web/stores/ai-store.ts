@@ -10,10 +10,12 @@ import type {
   AiRejectedSourceFile,
   AiSourceRecord,
   AiUploadProgressEvent,
+  AiUploadWarning,
 } from "@/lib/ai/types";
 import {
   deleteAiConversation,
   deleteAiSource,
+  deleteAiSources,
   fetchAiConversation,
   fetchAiConversations,
   fetchAiManifest,
@@ -39,8 +41,11 @@ interface AiState {
   dismissCompactionNotice: () => void;
   loadSources: () => Promise<void>;
   loadConversations: () => Promise<void>;
-  uploadSources: (files: File[]) => Promise<AiRejectedSourceFile[]>;
+  uploadSources: (
+    files: File[],
+  ) => Promise<{ rejected: AiRejectedSourceFile[]; warnings: AiUploadWarning[] }>;
   removeSource: (sourceId: string) => Promise<void>;
+  removeSources: (sourceIds: string[]) => Promise<void>;
   editSourceMetadata: (
     sourceId: string,
     updates: { title: string; authors: string[]; year: string },
@@ -193,14 +198,17 @@ export const useAiStore = create<AiState>((set, get) => ({
     const token = ++sourcesOpSeq;
     set({ actionLoading: true, error: null, uploadProgress: null });
     try {
-      const { rejected, ...manifest } = await uploadAiSources(files, (event) => {
-        if (token === sourcesOpSeq) set({ uploadProgress: event });
-      });
-      if (token !== sourcesOpSeq) return rejected;
+      const { rejected, warnings, ...manifest } = await uploadAiSources(
+        files,
+        (event) => {
+          if (token === sourcesOpSeq) set({ uploadProgress: event });
+        },
+      );
+      if (token !== sourcesOpSeq) return { rejected, warnings };
       set({ manifest, sources: manifest.sources });
-      return rejected;
+      return { rejected, warnings };
     } catch (error) {
-      if (token !== sourcesOpSeq) return [];
+      if (token !== sourcesOpSeq) return { rejected: [], warnings: [] };
       set({
         error:
           error instanceof Error ? error.message : "Failed to upload sources",
@@ -238,6 +246,38 @@ export const useAiStore = create<AiState>((set, get) => ({
       set({
         error:
           error instanceof Error ? error.message : "Failed to delete source",
+      });
+      throw error;
+    } finally {
+      if (token === sourcesOpSeq) set({ actionLoading: false });
+    }
+  },
+
+  async removeSources(sourceIds: string[]) {
+    const token = ++sourcesOpSeq;
+    set({ actionLoading: true, error: null });
+    try {
+      const manifest = await deleteAiSources(sourceIds);
+      if (token !== sourcesOpSeq) return;
+      const removedIds = new Set(sourceIds);
+      set((state) => ({
+        manifest,
+        sources: manifest.sources,
+        currentSourceIds: state.currentSourceIds.filter((id) => !removedIds.has(id)),
+        activeConversation: state.activeConversation
+          ? {
+              ...state.activeConversation,
+              sourceIds: state.activeConversation.sourceIds.filter(
+                (id) => !removedIds.has(id),
+              ),
+            }
+          : state.activeConversation,
+      }));
+    } catch (error) {
+      if (token !== sourcesOpSeq) return;
+      set({
+        error:
+          error instanceof Error ? error.message : "Failed to delete sources",
       });
       throw error;
     } finally {

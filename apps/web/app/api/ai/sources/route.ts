@@ -56,7 +56,7 @@ export async function POST(req: Request) {
           return;
         }
 
-        const { manifest, rejected } = await uploadAiSources(
+        const { manifest, rejected, warnings } = await uploadAiSources(
           projectDir,
           files,
           (event: AiUploadProgressEvent) => push("progress", event),
@@ -67,7 +67,7 @@ export async function POST(req: Request) {
           return;
         }
 
-        push("done", { ...manifest, rejected });
+        push("done", { ...manifest, rejected, warnings });
       } catch (error) {
         if (error instanceof NoProjectSelectedError) {
           push("error", { error: "no-project-selected" });

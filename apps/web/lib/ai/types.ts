@@ -131,6 +131,13 @@ export interface AiSourceRecord {
    * claims to draw on (see verifyAiCitation's kind === "note" guard).
    */
   drawsOnSourceIds?: string[];
+  /**
+   * SHA-256 of the raw uploaded bytes — lets a new upload be checked
+   * against every existing source for an exact-content duplicate without
+   * re-reading and re-hashing every file on disk each time. Absent for
+   * notes (never uploaded bytes to hash).
+   */
+  contentHash?: string;
 }
 
 export interface AiManifest {
@@ -151,8 +158,36 @@ export interface AiRejectedSourceFile {
   reason: string;
 }
 
+/** Non-blocking: the file was still uploaded and indexed, just flagged. */
+export interface AiUploadWarning {
+  name: string;
+  reason: string;
+}
+
 export interface AiUploadResult extends AiManifest {
   rejected: AiRejectedSourceFile[];
+  warnings: AiUploadWarning[];
+}
+
+// A structural re-check of a \cite{...} already sitting in the project's
+// .tex text: does the key resolve to a real .bib entry, linked to a real
+// knowledge-base source, at a page that source actually has. Not a
+// re-verification of the exact sentence/quote originally checked when the
+// citation was inserted — that quote only ever lived in the chat citation
+// chip, never persisted anywhere durable next to the .tex text itself.
+export type CitationAuditStatus =
+  | "ok"
+  | "missing-bib-entry"
+  | "page-out-of-range"
+  | "unlinked-source"
+  | "no-page-cited";
+
+export interface AuditedCitation {
+  file: string;
+  key: string;
+  page: number | null;
+  status: CitationAuditStatus;
+  detail: string;
 }
 
 // Embedding a large PDF (hundreds of pages -> thousands of chunks) through a
