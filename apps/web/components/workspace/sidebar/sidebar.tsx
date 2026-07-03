@@ -21,9 +21,10 @@ import {
   type ImperativePanelHandle,
 } from "react-resizable-panels";
 import { toast } from "sonner";
-import { useFsStore } from "@/stores/fs-store";
+import { useFsStore, flattenFiles } from "@/stores/fs-store";
 import { useEditorStore } from "@/stores/editor-store";
 import { usePdfStore } from "@/stores/pdf-store";
+import { readFile } from "@/lib/fs/fs-client";
 import { describeOutcome, syncForward } from "@/lib/synctex";
 import { Button } from "@/components/ui/button";
 import { FileTree } from "./file-tree";
@@ -37,33 +38,109 @@ interface TocItem {
   level: number;
   title: string;
   line: number;
+  /** Project-relative path of the file this entry came from — a multi-file
+   * document's outline spans \input/\include'd chapter files, not just
+   * whichever one happens to be open in the editor. */
+  file: string;
 }
 
-function parseTableOfContents(content: string): TocItem[] {
-  const lines = content.split("\n");
-  const toc: TocItem[] = [];
-  const sectionRegex =
-    /\\(section|subsection|subsubsection|chapter|part)\*?\s*\{([^}]*)\}/;
-  const levelMap: Record<string, number> = {
-    part: 0,
-    chapter: 1,
-    section: 2,
-    subsection: 3,
-    subsubsection: 4,
-  };
+const SECTION_REGEX =
+  /\\(part|chapter|section|subsection|subsubsection)\*?\s*\{([^}]*)\}/;
+const INCLUDE_REGEX = /\\(?:input|include)\s*\{([^}]+)\}/;
+const TOC_LEVEL_MAP: Record<string, number> = {
+  part: 0,
+  chapter: 1,
+  section: 2,
+  subsection: 3,
+  subsubsection: 4,
+};
 
-  lines.forEach((line, index) => {
-    const match = line.match(sectionRegex);
-    if (match) {
-      const [, type, title] = match;
-      toc.push({
-        level: levelMap[type] ?? 2,
+/** Resolve a \input/\include argument to a project-relative .tex path. */
+function resolveIncludeTarget(raw: string): string {
+  const target = raw.trim().replace(/^\.\//, "");
+  return target.toLowerCase().endsWith(".tex") ? target : `${target}.tex`;
+}
+
+/**
+ * Recursively walks a .tex file's own sections plus anything it
+ * \input/\include's, so the outline reflects the whole document rather than
+ * just whichever chapter file happens to be open — thesis/report projects
+ * routinely split chapters into separate files included from a root main.tex
+ * that has no section commands of its own.
+ */
+async function buildTocForFile(
+  filePath: string,
+  content: string,
+  visited: Set<string>,
+  readSource: (path: string) => Promise<string | null>,
+  depth: number,
+): Promise<TocItem[]> {
+  if (depth > 20 || visited.has(filePath)) return [];
+  visited.add(filePath);
+
+  const items: TocItem[] = [];
+  const lines = content.split("\n");
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^\s*%/.test(line)) continue;
+
+    const sectionMatch = line.match(SECTION_REGEX);
+    if (sectionMatch) {
+      const [, type, title] = sectionMatch;
+      items.push({
+        level: TOC_LEVEL_MAP[type] ?? 2,
         title: title.trim(),
-        line: index + 1,
+        line: i + 1,
+        file: filePath,
       });
+      continue;
     }
-  });
-  return toc;
+
+    const includeMatch = line.match(INCLUDE_REGEX);
+    if (includeMatch) {
+      const targetPath = resolveIncludeTarget(includeMatch[1]);
+      if (!visited.has(targetPath)) {
+        const targetContent = await readSource(targetPath);
+        if (targetContent != null) {
+          items.push(
+            ...(await buildTocForFile(
+              targetPath,
+              targetContent,
+              visited,
+              readSource,
+              depth + 1,
+            )),
+          );
+        }
+      }
+    }
+  }
+
+  return items;
+}
+
+/**
+ * Picks the document's root file the same way the compile route does:
+ * prefer a root-level .tex containing \documentclass, then main(.tex) /
+ * main_thesis.tex, then the first root-level .tex — so the outline starts
+ * walking from the same place pdflatex would.
+ */
+async function pickMainTexPath(
+  candidates: string[],
+  readSource: (path: string) => Promise<string | null>,
+): Promise<string | null> {
+  if (candidates.length <= 1) return candidates[0] ?? null;
+
+  for (const path of candidates) {
+    const content = await readSource(path);
+    if (content?.includes("\\documentclass")) return path;
+  }
+  return (
+    candidates.find((p) => p === "main.tex") ??
+    candidates.find((p) => p === "main_thesis.tex") ??
+    candidates[0]
+  );
 }
 
 export function Sidebar() {
@@ -89,10 +166,68 @@ export function Sidebar() {
   const [scCollapsed, setScCollapsed] = useState(false);
   const [outlineCollapsed, setOutlineCollapsed] = useState(false);
 
-  const toc = useMemo(
-    () => (activeKind === "text" ? parseTableOfContents(buffer) : []),
-    [buffer, activeKind],
-  );
+  const [toc, setToc] = useState<TocItem[]>([]);
+
+  // Builds the outline from the whole document (root file + everything it
+  // \input/\include's), not just the currently active buffer — debounced
+  // since it re-walks on every keystroke in the active file. The active
+  // file's own content is read from the live buffer so its section still
+  // updates as you type; every other file is read from disk.
+  useEffect(() => {
+    let cancelled = false;
+
+    const readSource = async (path: string): Promise<string | null> => {
+      if (path === activePath && activeKind === "text") return buffer;
+      try {
+        const res = await readFile(path);
+        return res.type === "text" ? res.content : null;
+      } catch {
+        return null;
+      }
+    };
+
+    const timer = setTimeout(() => {
+      void (async () => {
+        const texPaths = flattenFiles(tree).filter((p) =>
+          p.toLowerCase().endsWith(".tex"),
+        );
+        if (texPaths.length === 0) {
+          if (!cancelled) setToc([]);
+          return;
+        }
+
+        const rootLevel = texPaths.filter((p) => !p.includes("/"));
+        const mainPath =
+          (await pickMainTexPath(
+            rootLevel.length > 0 ? rootLevel : texPaths,
+            readSource,
+          )) ??
+          activePath ??
+          texPaths[0];
+
+        const mainContent = await readSource(mainPath);
+        if (cancelled) return;
+        if (mainContent == null) {
+          setToc([]);
+          return;
+        }
+
+        const items = await buildTocForFile(
+          mainPath,
+          mainContent,
+          new Set(),
+          readSource,
+          0,
+        );
+        if (!cancelled) setToc(items);
+      })();
+    }, 300);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [tree, activePath, activeKind, buffer]);
 
   const rootName = useMemo(() => {
     if (!root) return "Project";
@@ -100,28 +235,25 @@ export function Sidebar() {
     return parts[parts.length - 1] ?? "Project";
   }, [root]);
 
-  const handleTocClick = useCallback(
-    async (line: number) => {
-      if (!activePath) return;
-      const outcome = await syncForward(activePath, line, 0);
-      if (outcome.kind === "ok") {
-        const { page, h, v, width, height } = outcome.value;
-        usePdfStore.getState().setSynctexHighlight({
-          page,
-          x: h,
-          y: v,
-          width,
-          height,
-          key: Date.now(),
-        });
-        usePdfStore.getState().setScrollToPage(page);
-      } else {
-        const msg = describeOutcome(outcome);
-        if (msg) toast(msg);
-      }
-    },
-    [activePath],
-  );
+  const handleTocClick = useCallback(async (item: TocItem) => {
+    await useEditorStore.getState().goToLocation(item.file, item.line, 0);
+    const outcome = await syncForward(item.file, item.line, 0);
+    if (outcome.kind === "ok") {
+      const { page, h, v, width, height } = outcome.value;
+      usePdfStore.getState().setSynctexHighlight({
+        page,
+        x: h,
+        y: v,
+        width,
+        height,
+        key: Date.now(),
+      });
+      usePdfStore.getState().setScrollToPage(page);
+    } else {
+      const msg = describeOutcome(outcome);
+      if (msg) toast(msg);
+    }
+  }, []);
 
   return (
     <div className="flex h-full flex-col bg-sidebar text-sidebar-foreground">
@@ -266,12 +398,13 @@ export function Sidebar() {
         >
           <div className="h-full space-y-1 overflow-y-auto p-2">
             {toc.length > 0 ? (
-              toc.map((item, index) => (
+              toc.map((item) => (
                 <button
-                  key={index}
+                  key={`${item.file}:${item.line}`}
                   className="flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-sm transition-colors hover:bg-sidebar-accent/50"
                   style={{ paddingLeft: `${(item.level - 1) * 12 + 8}px` }}
-                  onClick={() => handleTocClick(item.line)}
+                  title={item.file}
+                  onClick={() => handleTocClick(item)}
                 >
                   <HashIcon className="size-3 shrink-0 text-muted-foreground" />
                   <span className="truncate">{item.title}</span>
