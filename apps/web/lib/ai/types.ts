@@ -32,9 +32,11 @@ export interface AiSource {
   ingestedAt?: string;
 }
 
+// There is exactly one conversation per project — see MAIN_CONVERSATION_ID
+// below — so a conversation is identified by this constant, never by a
+// user-visible id/title the way a multi-conversation UI would need.
 export interface AiConversation {
   id: string;
-  title: string;
   model: string;
   sdkSessionId?: string;
   messages: AiMessage[];
@@ -59,13 +61,11 @@ export interface AiConversation {
 // fallback that's accurate as long as the app keeps defaulting to Sonnet 5.
 export const DEFAULT_CONTEXT_WINDOW_TOKENS = 1_000_000;
 
-export interface AiConversationSummary {
-  id: string;
-  title: string;
-  messageCount: number;
-  updatedAt: string;
-  usage?: AiUsage;
-}
+// The whole app works one project at a time and the user works one
+// project in one continuing conversation — no picker, no list, just this
+// single fixed id under which the conversation (and its underlying Claude
+// Agent SDK session) persists and resumes indefinitely.
+export const MAIN_CONVERSATION_ID = "main";
 
 export type AiSourceKind = "pdf" | "markdown" | "text" | "note";
 
@@ -203,22 +203,13 @@ export type AiUploadProgressEvent =
 export type AiUploadProgressCallback = (event: AiUploadProgressEvent) => void;
 
 export interface AiChatRequest {
-  conversationId?: string;
   message: string;
   sourceIds?: string[];
   model?: string;
 }
 
 export interface AiChatStreamEvent {
-  type:
-    | "conversation"
-    | "assistant_chunk"
-    | "assistant_done"
-    | "usage"
-    | "compacted"
-    | "error"
-    | "sdk";
-  conversationId: string;
+  type: "assistant_chunk" | "assistant_done" | "usage" | "compacted" | "error" | "sdk";
   data?: unknown;
   message?: string;
 }

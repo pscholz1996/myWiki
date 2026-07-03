@@ -17,7 +17,6 @@ import {
   BadgeInfoIcon,
   FolderPlusIcon,
   Loader2Icon,
-  MessageSquarePlusIcon,
   SearchIcon,
   Trash2Icon,
   ShieldCheckIcon,
@@ -152,11 +151,7 @@ export function AiPanel() {
 
   const manifest = useAiStore((state) => state.manifest);
   const sources = useAiStore((state) => state.sources);
-  const conversations = useAiStore((state) => state.conversations);
   const activeConversation = useAiStore((state) => state.activeConversation);
-  const activeConversationId = useAiStore(
-    (state) => state.activeConversationId,
-  );
   const currentSourceIds = useAiStore((state) => state.currentSourceIds);
   const loading = useAiStore((state) => state.loading);
   const error = useAiStore((state) => state.error);
@@ -164,14 +159,12 @@ export function AiPanel() {
   const chatLoading = useAiStore((state) => state.chatLoading);
   const uploadProgress = useAiStore((state) => state.uploadProgress);
   const loadSources = useAiStore((state) => state.loadSources);
-  const loadConversations = useAiStore((state) => state.loadConversations);
+  const loadConversation = useAiStore((state) => state.loadConversation);
   const uploadSources = useAiStore((state) => state.uploadSources);
   const removeSource = useAiStore((state) => state.removeSource);
   const removeSources = useAiStore((state) => state.removeSources);
   const editSourceMetadata = useAiStore((state) => state.editSourceMetadata);
-  const createConversation = useAiStore((state) => state.createConversation);
-  const selectConversation = useAiStore((state) => state.selectConversation);
-  const removeConversation = useAiStore((state) => state.removeConversation);
+  const clearConversation = useAiStore((state) => state.clearConversation);
   const sendMessage = useAiStore((state) => state.sendMessage);
   const toggleSourceSelection = useAiStore((state) => state.toggleSourceSelection);
   const compactionNotice = useAiStore((state) => state.compactionNotice);
@@ -197,8 +190,8 @@ export function AiPanel() {
   );
 
   useEffect(() => {
-    void Promise.all([loadSources(), loadConversations()]);
-  }, [loadConversations, loadSources]);
+    void Promise.all([loadSources(), loadConversation()]);
+  }, [loadConversation, loadSources]);
 
   useEffect(() => {
     if (error) {
@@ -223,20 +216,16 @@ export function AiPanel() {
     fileInputRef.current?.click();
   };
 
-  const handleNewConversation = async () => {
-    await createConversation();
-    setDraft("");
-  };
-
-  const handleDeleteConversation = async () => {
-    if (!activeConversationId) return;
-    const title = activeConversation?.title ?? "this conversation";
-    const confirmed = window.confirm(`Delete "${title}"?`);
+  const handleClearConversation = async () => {
+    if (!activeConversation?.messages.length) return;
+    const confirmed = window.confirm(
+      "Clear the conversation? This can't be undone.",
+    );
     if (!confirmed) return;
 
     try {
-      await removeConversation(activeConversationId);
-      toast.success(`Deleted "${title}"`);
+      await clearConversation();
+      toast.success("Conversation cleared");
     } catch {
       // Store already captures the error.
     }
@@ -373,55 +362,6 @@ export function AiPanel() {
       </div>
 
       <div className="grid gap-3 border-b p-3">
-        <div className="grid gap-1.5">
-          <div className="font-medium text-muted-foreground text-xs">
-            Conversation
-          </div>
-          <div className="flex gap-2">
-            <Select
-              value={activeConversationId ?? "new"}
-              onValueChange={(value) => {
-                if (value === "new") {
-                  void handleNewConversation();
-                  return;
-                }
-                void selectConversation(value);
-              }}
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Start a conversation" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="new">New conversation</SelectItem>
-                {conversations.map((conversation) => (
-                  <SelectItem key={conversation.id} value={conversation.id}>
-                    {conversation.title}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            <Button
-              size="icon"
-              variant="secondary"
-              onClick={() => void handleNewConversation()}
-            >
-              <MessageSquarePlusIcon className="size-4" />
-            </Button>
-
-            <Button
-              size="icon"
-              variant="ghost"
-              className="text-muted-foreground"
-              onClick={() => void handleDeleteConversation()}
-              disabled={!activeConversationId || actionLoading}
-              aria-label="Delete conversation"
-            >
-              <Trash2Icon className="size-4" />
-            </Button>
-          </div>
-        </div>
-
         <div className="grid gap-2 rounded-lg border bg-muted/20 p-3">
           <div className="flex items-center justify-between gap-2">
             <div>
@@ -658,6 +598,18 @@ export function AiPanel() {
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col gap-3 p-3">
+        <div className="flex items-center justify-end">
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 gap-1.5 px-2 text-muted-foreground text-xs"
+            onClick={() => void handleClearConversation()}
+            disabled={!activeConversation?.messages.length || actionLoading}
+          >
+            <Trash2Icon className="size-3.5" />
+            Clear conversation
+          </Button>
+        </div>
         <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto rounded-lg border border-dashed px-3 py-3">
           {activeConversation?.messages.length ? (
             activeConversation.messages.map((message) => (

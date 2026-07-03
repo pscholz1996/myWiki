@@ -89,7 +89,6 @@ async function serializePrompt(
     staleSourceIds.length > 0
       ? `- The following source IDs were cited earlier in this conversation but have since been permanently REMOVED from the knowledge base: ${staleSourceIds.join(", ")}. Do not restate, confirm, or rely on anything from them. If asked, say the source was removed from the knowledge base and that information can no longer be verified.`
       : null,
-    `Conversation title: ${conversation.title}`,
     request.sourceIds && request.sourceIds.length > 0
       ? `Selected sources: ${request.sourceIds.join(", ")}`
       : "Selected sources: all available sources",

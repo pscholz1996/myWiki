@@ -4,27 +4,21 @@ import {
   readAiConversation,
 } from "@/lib/ai/conversations";
 import { getProjectDir, NoProjectSelectedError } from "@/lib/fs/project-dir";
+import { MAIN_CONVERSATION_ID } from "@/lib/ai/types";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-export async function GET(
-  _req: Request,
-  context: { params: Promise<{ conversationId: string }> },
-) {
+// There's exactly one conversation per project (see MAIN_CONVERSATION_ID),
+// so this route is singular and unparameterized — no id to pick between.
+
+export async function GET() {
   try {
-    const { conversationId } = await context.params;
     const projectDir = getProjectDir();
     const conversation = await readAiConversation(
       projectDir,
-      conversationId,
+      MAIN_CONVERSATION_ID,
     );
-    if (!conversation) {
-      return NextResponse.json(
-        { error: "conversation-not-found" },
-        { status: 404 },
-      );
-    }
     return NextResponse.json({ conversation });
   } catch (error) {
     if (error instanceof NoProjectSelectedError) {
@@ -38,14 +32,14 @@ export async function GET(
   }
 }
 
-export async function DELETE(
-  _req: Request,
-  context: { params: Promise<{ conversationId: string }> },
-) {
+// Clears the conversation so the next message starts a fresh Claude Agent
+// SDK session — the whole point of a single continuing conversation is
+// that it always resumes, so "start over" has to be an explicit action
+// rather than something that happens by switching to a new one.
+export async function DELETE() {
   try {
-    const { conversationId } = await context.params;
     const projectDir = getProjectDir();
-    await deleteAiConversation(projectDir, conversationId);
+    await deleteAiConversation(projectDir, MAIN_CONVERSATION_ID);
     return NextResponse.json({ ok: true });
   } catch (error) {
     if (error instanceof NoProjectSelectedError) {

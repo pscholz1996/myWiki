@@ -4,7 +4,6 @@ import type {
   AiChatStreamEvent,
   AiCompactionNotice,
   AiConversation,
-  AiConversationSummary,
   AiManifest,
   AiMessage,
   AiRejectedSourceFile,
@@ -12,12 +11,12 @@ import type {
   AiUploadProgressEvent,
   AiUploadWarning,
 } from "@/lib/ai/types";
+import { MAIN_CONVERSATION_ID } from "@/lib/ai/types";
 import {
-  deleteAiConversation,
+  clearAiConversation,
   deleteAiSource,
   deleteAiSources,
   fetchAiConversation,
-  fetchAiConversations,
   fetchAiManifest,
   streamAiChat,
   updateAiSourceMetadata,
@@ -27,8 +26,6 @@ import {
 interface AiState {
   manifest: AiManifest | null;
   sources: AiSourceRecord[];
-  conversations: AiConversationSummary[];
-  activeConversationId: string | null;
   activeConversation: AiConversation | null;
   currentSourceIds: string[];
   loading: boolean;
@@ -39,7 +36,7 @@ interface AiState {
   compactionNotice: AiCompactionNotice | null;
   dismissCompactionNotice: () => void;
   loadSources: () => Promise<void>;
-  loadConversations: () => Promise<void>;
+  loadConversation: () => Promise<void>;
   uploadSources: (
     files: File[],
   ) => Promise<{ rejected: AiRejectedSourceFile[]; warnings: AiUploadWarning[] }>;
@@ -49,9 +46,7 @@ interface AiState {
     sourceId: string,
     updates: { title: string; authors: string[]; year: string },
   ) => Promise<void>;
-  createConversation: (title?: string) => Promise<string>;
-  selectConversation: (conversationId: string) => Promise<void>;
-  removeConversation: (conversationId: string) => Promise<void>;
+  clearConversation: () => Promise<void>;
   sendMessage: (message: string) => Promise<void>;
   toggleSourceSelection: (sourceId: string) => void;
 }
@@ -115,22 +110,6 @@ function finalizeAssistantMessage(
   return { ...conversation, messages, usage: cumulativeUsage, contextTokens };
 }
 
-function mergeConversationSummary(
-  summaries: AiConversationSummary[],
-  next: AiConversationSummary,
-): AiConversationSummary[] {
-  const index = summaries.findIndex((summary) => summary.id === next.id);
-  const copy = [...summaries];
-
-  if (index === -1) {
-    copy.unshift(next);
-  } else {
-    copy[index] = next;
-  }
-
-  return copy.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
-}
-
 // Guards loadSources/uploadSources/removeSource against overwriting each
 // other with stale data. All three fetch-then-set the same manifest/sources
 // pair, so whichever *response* lands last normally wins — but responses
@@ -147,8 +126,6 @@ let sourcesOpSeq = 0;
 export const useAiStore = create<AiState>((set, get) => ({
   manifest: null,
   sources: [],
-  conversations: [],
-  activeConversationId: null,
   activeConversation: null,
   currentSourceIds: [],
   loading: false,
@@ -176,15 +153,18 @@ export const useAiStore = create<AiState>((set, get) => ({
     }
   },
 
-  async loadConversations() {
+  async loadConversation() {
     set({ loading: true, error: null });
     try {
-      const conversations = await fetchAiConversations();
-      set({ conversations });
+      const conversation = await fetchAiConversation();
+      set({
+        activeConversation: conversation,
+        currentSourceIds: conversation?.sourceIds ?? [],
+      });
     } catch (error) {
       set({
         error:
-          error instanceof Error ? error.message : "Failed to load conversations",
+          error instanceof Error ? error.message : "Failed to load conversation",
       });
     } finally {
       set({ loading: false });
@@ -309,73 +289,19 @@ export const useAiStore = create<AiState>((set, get) => ({
     }
   },
 
-  async createConversation(title?: string) {
-    const conversationId = newId();
-    const conversation: AiConversation = {
-      id: conversationId,
-      title: title ?? "New conversation",
-      model: "claude-sonnet-5",
-      sdkSessionId: conversationId,
-      messages: [],
-      sourceIds: get().currentSourceIds,
-      updatedAt: nowIso(),
-    };
-
-    set((state) => ({
-      activeConversationId: conversationId,
-      activeConversation: conversation,
-      conversations: mergeConversationSummary(state.conversations, {
-        id: conversationId,
-        title: conversation.title,
-        messageCount: 0,
-        updatedAt: conversation.updatedAt,
-        usage: conversation.usage,
-      }),
-    }));
-
-    return conversationId;
-  },
-
-  async selectConversation(conversationId: string) {
-    set({ loading: true, error: null });
-    try {
-      const conversation = await fetchAiConversation(conversationId);
-      set({
-        activeConversationId: conversation.id,
-        activeConversation: conversation,
-        currentSourceIds: conversation.sourceIds,
-      });
-    } catch (error) {
-      set({
-        error:
-          error instanceof Error ? error.message : "Failed to load conversation",
-      });
-    } finally {
-      set({ loading: false });
-    }
-  },
-
-  async removeConversation(conversationId: string) {
+  // Deletes the persisted conversation so the next message starts a
+  // genuinely fresh Claude Agent SDK session — there's only ever one
+  // conversation, so "clear" is the only reset this app offers instead of
+  // switching to a different one.
+  async clearConversation() {
     set({ actionLoading: true, error: null });
     try {
-      await deleteAiConversation(conversationId);
-      set((state) => ({
-        conversations: state.conversations.filter(
-          (conversation) => conversation.id !== conversationId,
-        ),
-        activeConversationId:
-          state.activeConversationId === conversationId
-            ? null
-            : state.activeConversationId,
-        activeConversation:
-          state.activeConversationId === conversationId
-            ? null
-            : state.activeConversation,
-      }));
+      await clearAiConversation();
+      set({ activeConversation: null });
     } catch (error) {
       set({
         error:
-          error instanceof Error ? error.message : "Failed to delete conversation",
+          error instanceof Error ? error.message : "Failed to clear conversation",
       });
       throw error;
     } finally {
@@ -392,42 +318,25 @@ export const useAiStore = create<AiState>((set, get) => ({
       return;
     }
 
-    let activeConversation = get().activeConversation;
-    if (!activeConversation) {
-      const conversationId = await get().createConversation();
-      activeConversation = get().activeConversation;
-      if (!activeConversation) {
-        activeConversation = {
-          id: conversationId,
-          title: "New conversation",
-          model: "claude-sonnet-5",
-          sdkSessionId: conversationId,
-          messages: [],
-          sourceIds: get().currentSourceIds,
-          updatedAt: nowIso(),
-        };
-      }
-    }
+    const activeConversation: AiConversation = get().activeConversation ?? {
+      id: MAIN_CONVERSATION_ID,
+      model: "claude-sonnet-5",
+      sdkSessionId: MAIN_CONVERSATION_ID,
+      messages: [],
+      sourceIds: get().currentSourceIds,
+      updatedAt: nowIso(),
+    };
 
     const userMessage = makeUserMessage(trimmed);
     const nextConversation: AiConversation = {
       ...activeConversation,
       messages: [...activeConversation.messages, userMessage],
       updatedAt: nowIso(),
-      title:
-        activeConversation.title === "New conversation" &&
-        activeConversation.messages.length === 0
-          ? trimmed.slice(0, 64)
-          : activeConversation.title,
     };
 
-    set({
-      activeConversationId: nextConversation.id,
-      activeConversation: nextConversation,
-    });
+    set({ activeConversation: nextConversation });
 
     const request: AiChatRequest = {
-      conversationId: nextConversation.id,
       message: trimmed,
       sourceIds: nextConversation.sourceIds,
       model: nextConversation.model,
@@ -435,25 +344,6 @@ export const useAiStore = create<AiState>((set, get) => ({
 
     try {
       await streamAiChat(request, (event: AiChatStreamEvent) => {
-        if (event.type === "conversation" && event.data && typeof event.data === "object") {
-          const data = event.data as {
-            id?: string;
-            title?: string;
-          };
-
-          set((state) => ({
-            activeConversation: state.activeConversation
-              ? {
-                  ...state.activeConversation,
-                  id: data.id ?? state.activeConversation.id,
-                  title: data.title ?? state.activeConversation.title,
-                }
-              : state.activeConversation,
-            activeConversationId: data.id ?? state.activeConversationId,
-          }));
-          return;
-        }
-
         if (event.type === "assistant_chunk" && event.data && typeof event.data === "object") {
           const data = event.data as { text?: string };
           const text = data.text;
@@ -515,8 +405,6 @@ export const useAiStore = create<AiState>((set, get) => ({
           set({ error: event.message });
         }
       });
-
-      await get().loadConversations();
     } catch (error) {
       set({
         error:

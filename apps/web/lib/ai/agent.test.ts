@@ -14,7 +14,6 @@ import type { AiConversation, AiManifest, AiMessage, AiSourceRecord } from "./ty
 function conversation(messages: AiMessage[]): AiConversation {
   return {
     id: "conv-1",
-    title: "Test conversation",
     model: "claude-sonnet-5",
     messages,
     sourceIds: [],

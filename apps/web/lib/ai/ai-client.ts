@@ -2,7 +2,6 @@ import type {
   AiChatRequest,
   AiChatStreamEvent,
   AiConversation,
-  AiConversationSummary,
   AiManifest,
   AiRejectedSourceFile,
   AiSourceRecord,
@@ -160,30 +159,16 @@ export async function updateAiSourceMetadata(
   return res.json() as Promise<AiSourceRecord>;
 }
 
-export async function fetchAiConversations(): Promise<AiConversationSummary[]> {
-  const res = await fetch("/api/ai/conversations", { cache: "no-store" });
+// There's exactly one conversation per project — no id to pick between.
+export async function fetchAiConversation(): Promise<AiConversation | null> {
+  const res = await fetch("/api/ai/conversation", { cache: "no-store" });
   if (!res.ok) throw await errFrom(res);
-  const data = (await res.json()) as { conversations: AiConversationSummary[] };
-  return data.conversations;
-}
-
-export async function fetchAiConversation(
-  conversationId: string,
-): Promise<AiConversation> {
-  const res = await fetch(`/api/ai/conversations/${conversationId}`, {
-    cache: "no-store",
-  });
-  if (!res.ok) throw await errFrom(res);
-  const data = (await res.json()) as { conversation: AiConversation };
+  const data = (await res.json()) as { conversation: AiConversation | null };
   return data.conversation;
 }
 
-export async function deleteAiConversation(
-  conversationId: string,
-): Promise<{ ok: boolean }> {
-  const res = await fetch(`/api/ai/conversations/${conversationId}`, {
-    method: "DELETE",
-  });
+export async function clearAiConversation(): Promise<{ ok: boolean }> {
+  const res = await fetch("/api/ai/conversation", { method: "DELETE" });
   if (!res.ok) throw await errFrom(res);
   return res.json() as Promise<{ ok: boolean }>;
 }
@@ -204,13 +189,11 @@ export async function streamAiChat(
     try {
       onEvent({
         type: type as AiChatStreamEvent["type"] | string,
-        conversationId: request.conversationId ?? "",
         data: dataText ? JSON.parse(dataText) : undefined,
       } as AiChatStreamEvent);
     } catch {
       onEvent({
         type: "error",
-        conversationId: request.conversationId ?? "",
         message: dataText || "Failed to parse chat event",
       });
     }

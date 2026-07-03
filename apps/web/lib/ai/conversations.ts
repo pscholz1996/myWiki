@@ -1,12 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { ensureAiWorkspace } from "@/lib/ai/knowledge-base";
-import type {
-  AiConversation,
-  AiConversationSummary,
-  AiMessage,
-  AiUsage,
-} from "@/lib/ai/types";
+import type { AiConversation, AiMessage, AiUsage } from "@/lib/ai/types";
 
 const CONVERSATIONS_DIR = [".openlatex", "ai", "conversations"] as const;
 
@@ -23,38 +18,6 @@ async function ensureConversationDir(projectDir: string): Promise<string> {
   const dir = path.join(aiDir, "conversations");
   await fs.mkdir(dir, { recursive: true });
   return dir;
-}
-
-function summarizeConversation(conversation: AiConversation): AiConversationSummary {
-  return {
-    id: conversation.id,
-    title: conversation.title,
-    messageCount: conversation.messages.length,
-    updatedAt: conversation.updatedAt,
-    usage: conversation.usage,
-  };
-}
-
-export async function listAiConversations(
-  projectDir: string,
-): Promise<AiConversationSummary[]> {
-  const dir = await ensureConversationDir(projectDir);
-  const entries = await fs.readdir(dir, { withFileTypes: true });
-  const conversations: AiConversationSummary[] = [];
-
-  for (const entry of entries) {
-    if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
-    try {
-      const raw = await fs.readFile(path.join(dir, entry.name), "utf8");
-      const conversation = JSON.parse(raw) as AiConversation;
-      conversations.push(summarizeConversation(conversation));
-    } catch {
-      continue;
-    }
-  }
-
-  conversations.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
-  return conversations;
 }
 
 export async function readAiConversation(
@@ -90,14 +53,12 @@ export async function deleteAiConversation(
 export async function createAiConversation(params: {
   projectDir: string;
   conversationId: string;
-  title?: string;
   model?: string;
   sdkSessionId?: string;
   sourceIds?: string[];
 }): Promise<AiConversation> {
   const conversation: AiConversation = {
     id: params.conversationId,
-    title: params.title ?? "New conversation",
     model: params.model ?? "claude-sonnet-5",
     sdkSessionId: params.sdkSessionId,
     messages: [],

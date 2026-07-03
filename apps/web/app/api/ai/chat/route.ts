@@ -15,6 +15,7 @@ import type {
   AiMessage,
   AiUsage,
 } from "@/lib/ai/types";
+import { MAIN_CONVERSATION_ID } from "@/lib/ai/types";
 import { getProjectDir, NoProjectSelectedError } from "@/lib/fs/project-dir";
 
 export const dynamic = "force-dynamic";
@@ -164,7 +165,7 @@ export async function POST(req: Request) {
     }
 
     const projectDir = getProjectDir();
-    const conversationId = body.conversationId ?? randomUUID();
+    const conversationId = MAIN_CONVERSATION_ID;
     const existing = await readAiConversation(projectDir, conversationId);
     // No prior turns means no SDK session has been established yet — see
     // the isNewSession/resume split in runOpenLatexChatTurn.
@@ -182,10 +183,6 @@ export async function POST(req: Request) {
       model: body.model ?? conversation.model,
       sourceIds: body.sourceIds ?? conversation.sourceIds,
       sdkSessionId: conversation.sdkSessionId ?? conversation.id,
-      title:
-        conversation.title === "New conversation"
-          ? message.slice(0, 64)
-          : conversation.title,
     };
 
     const userMessage: AiMessage = {
@@ -207,11 +204,6 @@ export async function POST(req: Request) {
         const push = (type: string, data: unknown) => {
           controller.enqueue(sse(type, data));
         };
-
-        push("conversation", {
-          id: conversation.id,
-          title: conversation.title,
-        });
 
         let assistantText = "";
         let usage: AiUsage | undefined;
