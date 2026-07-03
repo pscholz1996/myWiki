@@ -51,31 +51,55 @@ export function CommitHistoryList() {
 
   return (
     <div className="pb-1">
-      {history.map((commit) => {
+      {history.map((commit, index) => {
         const detail = commitDetail.get(commit.hash);
         const isExpanded = expandedCommit === commit.hash;
+        // The line above the first dot and below the last dot is left
+        // transparent — nothing connects to a commit that's genuinely the
+        // start of what's loaded. When more history exists (historyHasMore),
+        // the line below the last visible commit stays colored as a visual
+        // hint that the graph continues past "Load more".
+        const isFirst = index === 0;
+        const isLast = index === history.length - 1 && !historyHasMore;
 
         return (
           <div key={commit.hash}>
             <button
               onClick={() => toggleExpandCommit(commit.hash)}
-              className="flex w-full items-center gap-1.5 px-2 py-1 text-left hover:bg-sidebar-accent/50"
+              className="flex w-full items-stretch text-left hover:bg-sidebar-accent/50"
             >
-              <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
-                {commit.shortHash}
-              </span>
-              <span className="min-w-0 flex-1 truncate text-xs">
-                {commit.message}
-              </span>
-              <span className="shrink-0 text-[10px] text-muted-foreground">
-                {formatDistanceToNowStrict(new Date(commit.date), {
-                  addSuffix: true,
-                })}
+              <div className="flex w-5 shrink-0 flex-col items-center">
+                <div
+                  className={cn(
+                    "w-px flex-1",
+                    isFirst ? "bg-transparent" : "bg-primary/25",
+                  )}
+                />
+                <div className="my-0.5 size-2 shrink-0 rounded-full bg-primary" />
+                <div
+                  className={cn(
+                    "w-px flex-1",
+                    isLast ? "bg-transparent" : "bg-primary/25",
+                  )}
+                />
+              </div>
+              <span className="flex min-w-0 flex-1 items-center gap-1.5 py-1 pr-2">
+                <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
+                  {commit.shortHash}
+                </span>
+                <span className="min-w-0 flex-1 truncate text-xs">
+                  {commit.message}
+                </span>
+                <span className="shrink-0 text-[10px] text-muted-foreground">
+                  {formatDistanceToNowStrict(new Date(commit.date), {
+                    addSuffix: true,
+                  })}
+                </span>
               </span>
             </button>
 
             {isExpanded && (
-              <div className="pb-1 pl-6">
+              <div className="pb-1 pl-7">
                 {!detail ? (
                   <div className="flex items-center py-1">
                     <Loader2Icon className="size-3 animate-spin text-muted-foreground" />

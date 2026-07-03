@@ -10,6 +10,8 @@ import {
   HashIcon,
   GitBranchIcon,
   ChevronDownIcon,
+  ArrowUpIcon,
+  ArrowDownIcon,
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import {
@@ -131,13 +133,26 @@ export function Sidebar() {
           </span>
         </div>
         {isGitRepo && branch && (
-          <div className="flex shrink-0 items-center gap-1 text-muted-foreground text-xs">
-            <GitBranchIcon className="size-3.5" />
+          <div
+            className="flex shrink-0 items-center gap-1 rounded-full bg-primary px-2 py-1 font-medium text-primary-foreground text-xs"
+            title={`On branch ${branch}`}
+          >
+            <GitBranchIcon className="size-3.5 shrink-0" />
             <span className="max-w-[80px] truncate">{branch}</span>
             {(ahead > 0 || behind > 0) && (
-              <span className="text-[10px]">
-                {ahead > 0 && `↑${ahead}`}
-                {behind > 0 && `↓${behind}`}
+              <span className="flex items-center gap-0.5 border-primary-foreground/30 border-l pl-1 font-mono text-[10px] opacity-90">
+                {ahead > 0 && (
+                  <span className="flex items-center">
+                    <ArrowUpIcon className="size-2.5" />
+                    {ahead}
+                  </span>
+                )}
+                {behind > 0 && (
+                  <span className="flex items-center">
+                    <ArrowDownIcon className="size-2.5" />
+                    {behind}
+                  </span>
+                )}
               </span>
             )}
           </div>
