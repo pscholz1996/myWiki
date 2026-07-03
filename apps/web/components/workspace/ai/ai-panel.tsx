@@ -434,7 +434,10 @@ export function AiPanel() {
             Research, write, and verify against your sources.
           </div>
           <div className="mt-1 flex items-center gap-1 text-[10px] text-muted-foreground/70">
-            <SiClaude className="size-2.5" />
+            {/* Claude's own brand color (SiClaude's defaultColor) — the
+                surrounding text stays muted, but the logo itself shouldn't
+                inherit that and go monochrome. */}
+            <SiClaude className="size-2.5" color="#D97757" />
             Powered by Claude
           </div>
         </div>
