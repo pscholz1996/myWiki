@@ -30,6 +30,7 @@ import { Button } from "@/components/ui/button";
 import { FileTree } from "./file-tree";
 import { SourceControl } from "./source-control";
 import { GithubAccountMenu } from "./github-account-menu";
+import { ClaudeAccountMenu } from "./claude-account-menu";
 import { useGitStore } from "@/stores/git-store";
 import { cn } from "@/lib/utils";
 import packageJson from "@/package.json";
@@ -421,8 +422,13 @@ export function Sidebar() {
 
       <div className="flex items-center justify-between border-sidebar-border border-t px-3 py-2 text-muted-foreground text-xs">
         <span>OpenLatex v{packageJson.version}</span>
-        <div className="flex items-center gap-1">
-          <GithubAccountMenu />
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1.5">
+            <span className="text-[11px]">Logins:</span>
+            <GithubAccountMenu />
+            <ClaudeAccountMenu />
+          </div>
+          <div className="h-4 w-px bg-sidebar-border" />
           {mounted && (
             <Button
               variant="ghost"
