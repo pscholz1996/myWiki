@@ -22,10 +22,6 @@ interface Props {
   onDelete: () => void;
   deleteDisabled: boolean;
   onSaveMetadata: (updates: MetadataEdits) => Promise<void>;
-  /** When set, the row's checkbox selects for a bulk action instead of chat scope. */
-  bulkMode?: boolean;
-  bulkSelected?: boolean;
-  onToggleBulkSelected?: () => void;
 }
 
 // A source "needs review" when part or all of its bibliographic metadata
@@ -96,9 +92,6 @@ export function SourceListItem({
   onDelete,
   deleteDisabled,
   onSaveMetadata,
-  bulkMode,
-  bulkSelected,
-  onToggleBulkSelected,
 }: Props) {
   const [expanded, setExpanded] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -160,15 +153,9 @@ export function SourceListItem({
         <div className="flex min-w-0 flex-1 items-start gap-2">
           <Checkbox
             className="mt-0.5"
-            checked={bulkMode ? Boolean(bulkSelected) : selected}
-            onCheckedChange={() =>
-              bulkMode ? onToggleBulkSelected?.() : onToggleSelected()
-            }
-            aria-label={
-              bulkMode
-                ? `Select ${source.originalName} for bulk actions`
-                : `Scope chat to ${source.originalName}`
-            }
+            checked={selected}
+            onCheckedChange={() => onToggleSelected()}
+            aria-label={`Scope chat to ${source.originalName}`}
           />
           <a
             href={`/api/ai/sources/${source.id}/file`}

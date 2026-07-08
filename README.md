@@ -69,9 +69,8 @@ A fourth panel powered by Claude (Claude Agent SDK), scoped entirely to your pro
 - **Knowledge base** — Upload PDFs, Markdown, or plain text. Each source is chunked, embedded locally (`@huggingface/transformers`, no external embedding API), and combined with a hand-rolled BM25 index for hybrid semantic + keyword search.
 - **Verified metadata, never invented** — Title/author/year are resolved in order of trust: a real match against the [CrossRef](https://www.crossref.org/) bibliographic database, then the PDF's own embedded metadata, then a page-layout heuristic (font size, byline position) — and every field is tagged with exactly how confident that source is, down to the individual field. A heuristic guess can never silently become part of a citation. Metadata can also be corrected by hand from the source list.
 - **Citation safety** — Every claim the assistant makes from a source is checked with `cite()` against the source's actual page text before it's allowed to appear as a citation — including when it writes `\cite[p.~<page>]{key}` directly into your `.tex` file, always with the exact page it just verified.
-- **Citation audit** — A "Check citations" action re-scans every `\cite`/`\citep`/`\citet`/`\parencite`/`\autocite`/`\textcite` already in your `.tex` files and flags anything broken: a missing `.bib` entry, a page beyond the source's real length, a `.bib` entry with no linked source, or a citation missing a page.
 - **Research notes** — The assistant can save its own synthesized understanding back into the knowledge base for later turns to build on — searchable, but never itself citable; every claim still traces back to a fresh `cite()` against a primary source.
-- **Source management** — Search and sort the source list, a "needs review" filter for sources with unverified metadata, multi-select bulk delete, and duplicate-upload detection (exact-hash rejection, near-duplicate-title warning).
+- **Source management** — Search and sort the source list, a "needs review" filter for sources with unverified metadata, and duplicate-upload detection (exact-hash rejection, near-duplicate-title warning).
 - **Plan usage** — The Current Session (5-hour) and Weekly Limits (7-day) usage cards match the Claude app's own usage view, backed by the Claude Agent SDK's usage API.
 - **No fixed "mode"** — There's no Research/Write/Organize picker; the assistant reads each request and decides whether it's a search, an edit to the `.tex` files, or both.
 
@@ -169,9 +168,8 @@ Next.js Server (apps/web)
   ├── /api/project/*       — current, set, browse, create
   ├── /api/ai/chat         — SSE chat stream (Claude Agent SDK, persistent session)
   ├── /api/ai/conversation — Get / clear the project's one conversation
-  ├── /api/ai/sources/*    — Upload, list, edit metadata, bulk-delete knowledge sources
+  ├── /api/ai/sources/*    — Upload, list, edit metadata, delete knowledge sources
   ├── /api/ai/search       — Hybrid (semantic + BM25) knowledge-base search
-  ├── /api/ai/citations/*  — Citation audit
   └── /api/ai/usage        — Claude plan usage (5-hour / weekly limits)
         │
         │  POST /builds/sync
@@ -198,7 +196,7 @@ OpenLaTex/
 │   │   ├── hooks/               # use-fs-startup, use-keyboard-shortcuts, use-current-project
 │   │   ├── lib/fs/              # Sandbox, echo suppression, watcher, clients
 │   │   ├── lib/git/             # Git runner (server), Git client (browser)
-│   │   ├── lib/ai/              # Knowledge base, CrossRef lookup, citation audit, chat agent
+│   │   ├── lib/ai/              # Knowledge base, CrossRef lookup, chat agent
 │   │   ├── stores/              # Zustand: fs, editor, pdf, git, ai, github
 │   │   └── styles/              # Tailwind CSS v4
 │   └── latex-api/               # Hono API — spawns pdflatex (unchanged from fork)

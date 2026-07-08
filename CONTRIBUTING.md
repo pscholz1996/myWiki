@@ -86,7 +86,7 @@ apps/web/
 ├── lib/
 │   ├── fs/               #   Sandbox, echo suppression, watcher, project-dir, clients
 │   ├── git/              #   Git runner (server-side execFile), Git client (browser fetch)
-│   ├── ai/               #   Knowledge base, CrossRef lookup, citation audit, chat agent
+│   ├── ai/               #   Knowledge base, CrossRef lookup, chat agent
 │   └── project/          #   Config module (~/openlatex/config.json), path utils
 ├── stores/               #   Zustand stores: fs, editor, pdf, git, ai, github
 └── styles/               #   Tailwind CSS v4 globals
@@ -114,7 +114,6 @@ Unit tests cover the security-critical modules:
 - `lib/fs/echo-suppression.test.ts` — Write-echo tracking with fake timers
 - `lib/ai/knowledge-base.test.ts` — Chunking, embedding search, citation verification
 - `lib/ai/crossref.test.ts` — Bibliographic metadata lookup and trust ordering
-- `lib/ai/citation-audit.test.ts` — Detecting broken/missing/unlinked citations
 
 There's no standing manual test checklist file — UI/functional changes are
 verified live against a running instance as part of development instead.

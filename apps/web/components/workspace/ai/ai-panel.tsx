@@ -26,11 +26,7 @@ import {
   type AiPlanUsage,
   type AiSourceRecord,
   type AiUploadProgressEvent,
-  type AuditedCitation,
-  type CitationAuditStatus,
 } from "@/lib/ai/types";
-import { fetchCitationAudit } from "@/lib/ai/ai-client";
-import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { AiMarkdown } from "./markdown";
 import { SourceListItem, sourceNeedsReview } from "./source-list-item";
@@ -217,35 +213,12 @@ function sortSources(list: AiSourceRecord[], mode: SourceSortMode): AiSourceReco
   }
 }
 
-// Ordered worst-first so a compile-breaking missing entry is never buried
-// below a merely informational "no page cited" note.
-const CITATION_STATUS_META: Record<
-  CitationAuditStatus,
-  { label: string; dotClassName: string; rank: number }
-> = {
-  "missing-bib-entry": { label: "Missing .bib entry", dotClassName: "bg-red-500", rank: 0 },
-  "page-out-of-range": { label: "Page out of range", dotClassName: "bg-amber-500", rank: 1 },
-  "unlinked-source": { label: "Source not linked", dotClassName: "bg-amber-500", rank: 2 },
-  "no-page-cited": { label: "No page cited", dotClassName: "bg-muted-foreground", rank: 3 },
-  ok: { label: "OK", dotClassName: "bg-emerald-500", rank: 4 },
-};
-
-function sortAuditedCitations(citations: AuditedCitation[]): AuditedCitation[] {
-  return [...citations].sort(
-    (a, b) => CITATION_STATUS_META[a.status].rank - CITATION_STATUS_META[b.status].rank,
-  );
-}
-
 export function AiPanel() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [draft, setDraft] = useState("");
   const [sourceQuery, setSourceQuery] = useState("");
   const [sourceSort, setSourceSort] = useState<SourceSortMode>("recent");
   const [reviewFilterOn, setReviewFilterOn] = useState(false);
-  const [bulkMode, setBulkMode] = useState(false);
-  const [bulkSelectedIds, setBulkSelectedIds] = useState<string[]>([]);
-  const [citationAudit, setCitationAudit] = useState<AuditedCitation[] | null>(null);
-  const [citationAuditLoading, setCitationAuditLoading] = useState(false);
 
   const manifest = useAiStore((state) => state.manifest);
   const sources = useAiStore((state) => state.sources);
@@ -262,7 +235,6 @@ export function AiPanel() {
   const planUsage = useAiStore((state) => state.planUsage);
   const uploadSources = useAiStore((state) => state.uploadSources);
   const removeSource = useAiStore((state) => state.removeSource);
-  const removeSources = useAiStore((state) => state.removeSources);
   const editSourceMetadata = useAiStore((state) => state.editSourceMetadata);
   const clearConversation = useAiStore((state) => state.clearConversation);
   const sendMessage = useAiStore((state) => state.sendMessage);
@@ -298,6 +270,17 @@ export function AiPanel() {
       toast.error(error);
     }
   }, [error]);
+
+  // The "Needs review" toggle button only renders while there's something to
+  // review — once the last source is fixed, the button vanishes along with
+  // any way to turn the filter back off. Auto-exit so the list returns to
+  // showing everything instead of getting stuck on an empty "No sources need
+  // review" state.
+  useEffect(() => {
+    if (needsReviewCount === 0 && reviewFilterOn) {
+      setReviewFilterOn(false);
+    }
+  }, [needsReviewCount, reviewFilterOn]);
 
   useEffect(() => {
     if (!compactionNotice) return;
@@ -382,49 +365,6 @@ export function AiPanel() {
     }
   };
 
-  const toggleBulkMode = () => {
-    setBulkMode((value) => !value);
-    setBulkSelectedIds([]);
-  };
-
-  const toggleBulkSelected = (sourceId: string) => {
-    setBulkSelectedIds((ids) =>
-      ids.includes(sourceId) ? ids.filter((id) => id !== sourceId) : [...ids, sourceId],
-    );
-  };
-
-  const handleBulkDelete = async () => {
-    const count = bulkSelectedIds.length;
-    if (count === 0) return;
-    const confirmed = window.confirm(
-      `Delete ${count} source${count === 1 ? "" : "s"} from the knowledge base?`,
-    );
-    if (!confirmed) return;
-
-    try {
-      await removeSources(bulkSelectedIds);
-      toast.success(`Deleted ${count} source${count === 1 ? "" : "s"}`);
-      setBulkMode(false);
-      setBulkSelectedIds([]);
-    } catch {
-      // Store already captures the error.
-    }
-  };
-
-  const handleAuditCitations = async () => {
-    setCitationAuditLoading(true);
-    try {
-      const result = await fetchCitationAudit();
-      setCitationAudit(result);
-    } catch (error) {
-      toast.error("Failed to check citations", {
-        description: error instanceof Error ? error.message : undefined,
-      });
-    } finally {
-      setCitationAuditLoading(false);
-    }
-  };
-
   return (
     <div className="flex h-full min-h-0 flex-col border-l bg-background/95">
       <div className="flex items-center justify-between gap-3 border-b px-3 py-2">
@@ -491,16 +431,6 @@ export function AiPanel() {
                 : "No indexed sources yet"}
             </span>
             <div className="flex items-center gap-1">
-              {sources.length > 0 ? (
-                <Button
-                  size="sm"
-                  variant={bulkMode ? "secondary" : "ghost"}
-                  className="h-7 px-2"
-                  onClick={toggleBulkMode}
-                >
-                  {bulkMode ? "Cancel" : "Select"}
-                </Button>
-              ) : null}
               <Button
                 size="sm"
                 variant="ghost"
@@ -515,26 +445,6 @@ export function AiPanel() {
               </Button>
             </div>
           </div>
-
-          {bulkMode ? (
-            <div className="flex items-center justify-between gap-2 rounded-md border bg-muted/40 px-3 py-1.5 text-xs">
-              <span className="text-muted-foreground">
-                {bulkSelectedIds.length === 0
-                  ? "Select sources to delete"
-                  : `${bulkSelectedIds.length} selected`}
-              </span>
-              <Button
-                size="sm"
-                variant="destructive"
-                className="h-6 px-2 text-xs"
-                onClick={() => void handleBulkDelete()}
-                disabled={bulkSelectedIds.length === 0 || actionLoading}
-              >
-                <Trash2Icon className="mr-1 size-3" />
-                Delete
-              </Button>
-            </div>
-          ) : null}
 
           {uploadProgress ? (
             <div className="space-y-1.5 rounded-md border bg-muted/40 px-3 py-2">
@@ -627,72 +537,10 @@ export function AiPanel() {
                   onSaveMetadata={(updates) =>
                     editSourceMetadata(source.id, updates)
                   }
-                  bulkMode={bulkMode}
-                  bulkSelected={bulkSelectedIds.includes(source.id)}
-                  onToggleBulkSelected={() => toggleBulkSelected(source.id)}
                 />
               ))
             )}
           </div>
-        </div>
-
-        <div className="grid gap-2 rounded-lg border bg-muted/20 p-3">
-          <div className="flex items-center justify-between gap-2">
-            <div>
-              <div className="font-medium text-sm">Citations</div>
-              <div className="text-muted-foreground text-xs">
-                Re-checks every citation already in the project's .tex files
-                against the .bib file and knowledge base.
-              </div>
-            </div>
-            <Button
-              size="sm"
-              variant="secondary"
-              onClick={() => void handleAuditCitations()}
-              disabled={citationAuditLoading}
-            >
-              {citationAuditLoading ? (
-                <Loader2Icon className="mr-2 size-3.5 animate-spin" />
-              ) : null}
-              Check citations
-            </Button>
-          </div>
-
-          {citationAudit ? (
-            citationAudit.length === 0 ? (
-              <div className="text-muted-foreground text-xs">
-                No citations found in any .tex file.
-              </div>
-            ) : (
-              <div className="max-h-52 space-y-1.5 overflow-y-auto pr-1 text-xs">
-                {sortAuditedCitations(citationAudit).map((citation, index) => {
-                  const meta = CITATION_STATUS_META[citation.status];
-                  return (
-                    <div
-                      key={`${citation.file}:${citation.key}:${index}`}
-                      className="flex items-start gap-2 rounded-md border bg-background px-2.5 py-1.5"
-                    >
-                      <span
-                        className={cn(
-                          "mt-1 size-1.5 shrink-0 rounded-full",
-                          meta.dotClassName,
-                        )}
-                        title={meta.label}
-                      />
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate font-medium">
-                          {`\\cite{${citation.key}}`}
-                          {citation.page ? ` · p. ${citation.page}` : ""}
-                          <span className="text-muted-foreground"> — {citation.file}</span>
-                        </div>
-                        <div className="text-muted-foreground">{citation.detail}</div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )
-          ) : null}
         </div>
       </div>
 
@@ -776,10 +624,7 @@ export function AiPanel() {
               }
             }}
           />
-          <div className="flex items-center justify-between gap-2">
-            <div className="text-muted-foreground text-xs">
-              Sources will be verified against the original PDF before citation.
-            </div>
+          <div className="flex items-center justify-end gap-2">
             <Button
               size="sm"
               onClick={() => void handleSend()}

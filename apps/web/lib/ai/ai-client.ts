@@ -8,7 +8,6 @@ import type {
   AiSourceRecord,
   AiUploadProgressEvent,
   AiUploadResult,
-  AuditedCitation,
 } from "@/lib/ai/types";
 
 function errFrom(res: Response): Promise<Error> {
@@ -135,17 +134,6 @@ export async function deleteAiSource(sourceId: string): Promise<AiManifest> {
   return res.json() as Promise<AiManifest>;
 }
 
-export async function deleteAiSources(sourceIds: string[]): Promise<AiManifest> {
-  const res = await fetch("/api/ai/sources/bulk-delete", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ sourceIds }),
-  });
-
-  if (!res.ok) throw await errFrom(res);
-  return res.json() as Promise<AiManifest>;
-}
-
 export async function updateAiSourceMetadata(
   sourceId: string,
   updates: { title: string; authors: string[]; year: string },
@@ -199,13 +187,6 @@ export async function streamAiChat(
       });
     }
   });
-}
-
-export async function fetchCitationAudit(): Promise<AuditedCitation[]> {
-  const data = await getJson<{ citations: AuditedCitation[] }>(
-    "/api/ai/citations/audit",
-  );
-  return data.citations;
 }
 
 // null before the first message of a server run (no live SDK session yet

@@ -16,7 +16,6 @@ import { MAIN_CONVERSATION_ID } from "@/lib/ai/types";
 import {
   clearAiConversation,
   deleteAiSource,
-  deleteAiSources,
   fetchAiConversation,
   fetchAiManifest,
   fetchPlanUsage,
@@ -45,7 +44,6 @@ interface AiState {
     files: File[],
   ) => Promise<{ rejected: AiRejectedSourceFile[]; warnings: AiUploadWarning[] }>;
   removeSource: (sourceId: string) => Promise<void>;
-  removeSources: (sourceIds: string[]) => Promise<void>;
   editSourceMetadata: (
     sourceId: string,
     updates: { title: string; authors: string[]; year: string },
@@ -240,38 +238,6 @@ export const useAiStore = create<AiState>((set, get) => ({
       set({
         error:
           error instanceof Error ? error.message : "Failed to delete source",
-      });
-      throw error;
-    } finally {
-      if (token === sourcesOpSeq) set({ actionLoading: false });
-    }
-  },
-
-  async removeSources(sourceIds: string[]) {
-    const token = ++sourcesOpSeq;
-    set({ actionLoading: true, error: null });
-    try {
-      const manifest = await deleteAiSources(sourceIds);
-      if (token !== sourcesOpSeq) return;
-      const removedIds = new Set(sourceIds);
-      set((state) => ({
-        manifest,
-        sources: manifest.sources,
-        currentSourceIds: state.currentSourceIds.filter((id) => !removedIds.has(id)),
-        activeConversation: state.activeConversation
-          ? {
-              ...state.activeConversation,
-              sourceIds: state.activeConversation.sourceIds.filter(
-                (id) => !removedIds.has(id),
-              ),
-            }
-          : state.activeConversation,
-      }));
-    } catch (error) {
-      if (token !== sourcesOpSeq) return;
-      set({
-        error:
-          error instanceof Error ? error.message : "Failed to delete sources",
       });
       throw error;
     } finally {

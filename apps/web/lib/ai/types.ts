@@ -165,27 +165,6 @@ export interface AiUploadResult extends AiManifest {
   warnings: AiUploadWarning[];
 }
 
-// A structural re-check of a \cite{...} already sitting in the project's
-// .tex text: does the key resolve to a real .bib entry, linked to a real
-// knowledge-base source, at a page that source actually has. Not a
-// re-verification of the exact sentence/quote originally checked when the
-// citation was inserted — that quote only ever lived in the chat citation
-// chip, never persisted anywhere durable next to the .tex text itself.
-export type CitationAuditStatus =
-  | "ok"
-  | "missing-bib-entry"
-  | "page-out-of-range"
-  | "unlinked-source"
-  | "no-page-cited";
-
-export interface AuditedCitation {
-  file: string;
-  key: string;
-  page: number | null;
-  status: CitationAuditStatus;
-  detail: string;
-}
-
 export interface AiPlanUsageWindow {
   /** Percentage of the window used, 0-100. */
   utilization: number;
