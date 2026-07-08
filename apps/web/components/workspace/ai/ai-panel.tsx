@@ -373,13 +373,6 @@ export function AiPanel() {
           <div className="text-muted-foreground text-xs">
             Research, write, and verify against your sources.
           </div>
-          <div className="mt-1 flex items-center gap-1 text-[10px] text-muted-foreground/70">
-            {/* Claude's own brand color (SiClaude's defaultColor) — the
-                surrounding text stays muted, but the logo itself shouldn't
-                inherit that and go monochrome. */}
-            <SiClaude className="size-2.5" color="#D97757" />
-            Powered by Claude
-          </div>
         </div>
         <div className="flex flex-col items-end gap-0.5 text-muted-foreground text-xs">
           {activeConversation?.contextTokens ? (
@@ -624,7 +617,14 @@ export function AiPanel() {
               }
             }}
           />
-          <div className="flex items-center justify-end gap-2">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5 text-muted-foreground text-xs">
+              {/* Claude's own brand color (SiClaude's defaultColor) — the
+                  surrounding text stays muted, but the logo itself shouldn't
+                  inherit that and go monochrome. */}
+              <SiClaude className="size-3.5" color="#D97757" />
+              Powered by Claude
+            </div>
             <Button
               size="sm"
               onClick={() => void handleSend()}
