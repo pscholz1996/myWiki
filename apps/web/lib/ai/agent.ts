@@ -23,6 +23,7 @@ import {
   saveResearchNote,
   searchAiKnowledgeBase,
   setAiSourceBibKey,
+  updateAiSourceMetadata,
   verifyAiCitation,
 } from "@/lib/ai/knowledge-base";
 import { listProjectTree, type FsNode } from "@/lib/fs/list";
@@ -93,6 +94,7 @@ async function serializePrompt(
     "- Re-verification is something you silently DO, never something you narrate. Don't tell the user you're \"confirming the source,\" \"re-verifying,\" or that a citation \"must be re-checked per policy\" — that's internal process, not part of the answer. Call cite() again, then answer as if this were the first time: the substantive answer only, no commentary about your own checking process.",
     "- When you're adding a source-backed sentence into the .tex text itself (not just discussing it in chat), a chat citation chip isn't enough: after cite() succeeds, get a cite key (the cite() result's source.bibKey if it's already set, otherwise call ensure_bibtex_entry) and insert \\cite[p.~<page>]{key} — e.g. \\cite[p.~12]{key} — at that spot with replace_in_project_file, using the EXACT page number cite() just verified. Never insert a bare \\cite{key} with no page for a page-specific claim, and never write a page number you did not just verify with cite() in this turn — if a paragraph draws on several pages of the same source, verify and cite each page-specific claim separately rather than picking one page to stand in for all of them.",
     "- Search results and browse_knowledge_base may include research notes you saved in earlier turns (kind \"note\") alongside primary sources. A note is useful context — your own prior synthesis — but never a substitute for a fresh cite() against the primary source it's based on; cite() will refuse to verify a quote against a note even if the text matches. When you've built a genuinely new synthesis worth keeping (e.g. after a broad multi-source search on a substantive question), save it with save_research_note so future turns don't have to redo that search from scratch.",
+    "- If a source's stored title/authors (from CrossRef or the PDF's own metadata) looks wrong against what the page text actually says, point it out and ask before changing anything — never silently trust or silently overwrite it. Once the user explicitly confirms the correct values, call update_source_metadata with the full corrected title/authors/year so the fix actually sticks in the knowledge base, rather than only mentioning the mismatch or only fixing it inside a BibTeX entry.",
     staleSourceIds.length > 0
       ? `- The following source IDs were cited earlier in this conversation but have since been permanently REMOVED from the knowledge base: ${staleSourceIds.join(", ")}. Do not restate, confirm, or rely on anything from them. If asked, say the source was removed from the knowledge base and that information can no longer be verified.`
       : null,
@@ -631,6 +633,68 @@ export function createOpenLatexMcpServer(
               error instanceof Error
                 ? error.message
                 : "Failed to create BibTeX entry",
+              true,
+            );
+          }
+        },
+      ),
+      tool(
+        "update_source_metadata",
+        "Correct a knowledge-base source's own stored title/authors/year (what browse_knowledge_base and the source list show) — distinct from a BibTeX entry's fields. Only call this once the user has explicitly confirmed the correction in this conversation (e.g. \"yes, fix it, the real title is X\"); noticing a likely mismatch yourself is a reason to point it out and ask, never to silently overwrite. Pass the full corrected title, authors, and year together, even for a field that isn't changing — like the source detail panel's own edit form, this replaces all three at once rather than patching one field. This sets the source's provenance to \"manual\", the same trust tier as a human editing it directly, so it can then be used to auto-fill ensure_bibtex_entry.",
+        {
+          source_id: z.string(),
+          title: z.string().min(1),
+          authors: z.array(z.string()),
+          year: z.string(),
+        },
+        async (args) => {
+          try {
+            const source = await getAiSourceRecord(projectDir, args.source_id);
+            if (!source) {
+              return callResult({ error: "Source not found" }, true);
+            }
+            if (source.kind === "note") {
+              return callResult(
+                {
+                  error: `"${source.originalName}" is an AI-authored research note, not a primary source — it has no bibliographic metadata to correct.`,
+                },
+                true,
+              );
+            }
+
+            const updated = await updateAiSourceMetadata(projectDir, args.source_id, {
+              title: args.title,
+              authors: args.authors,
+              year: args.year,
+            });
+
+            // Best-effort sanity check, same as ensure_bibtex_entry's — not a
+            // hard gate, since the whole point here is that some other
+            // system (CrossRef, the PDF's own embedded metadata) got it
+            // wrong and page 1 is the actual ground truth.
+            let titleVerified: boolean | null = null;
+            try {
+              const { text } = await readAiSourcePage(projectDir, args.source_id, 1);
+              titleVerified = normalizeWhitespace(text)
+                .toLowerCase()
+                .includes(normalizeWhitespace(args.title).toLowerCase());
+            } catch {
+              titleVerified = null;
+            }
+
+            return normalizeToolResult({
+              id: updated.id,
+              title: updated.metadata?.title,
+              authors: updated.metadata?.authors,
+              year: updated.metadata?.year,
+              provenance: updated.metadata?.provenance,
+              titleVerified,
+            });
+          } catch (error) {
+            return callResult(
+              error instanceof Error
+                ? error.message
+                : "Failed to update source metadata",
               true,
             );
           }
