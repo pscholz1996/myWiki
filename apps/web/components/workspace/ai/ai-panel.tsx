@@ -180,6 +180,40 @@ function matchesSourceQuery(source: AiSourceRecord, query: string): boolean {
   return haystack.includes(query);
 }
 
+// Rotating status words shown while a turn is running but no assistant text
+// has appeared yet (tool-call-heavy turns — searching the knowledge base,
+// reading source pages, verifying citations — can easily run 20-30s before
+// the first visible token, matching the Claude app's own "thinking" cycling
+// rather than a single static label.
+const THINKING_WORDS = [
+  "Thinking",
+  "Searching",
+  "Reading",
+  "Verifying",
+  "Cross-referencing",
+  "Synthesizing",
+  "Pondering",
+  "Considering",
+];
+
+function ThinkingIndicator() {
+  const [wordIndex, setWordIndex] = useState(0);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setWordIndex((index) => (index + 1) % THINKING_WORDS.length);
+    }, 1800);
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <div className="mr-auto flex max-w-[88%] items-center gap-2 rounded-2xl border bg-background px-3 py-2 text-muted-foreground text-sm">
+      <Loader2Icon className="size-3.5 animate-spin" />
+      {THINKING_WORDS[wordIndex]}…
+    </div>
+  );
+}
+
 // Missing values always sink to the end regardless of sort direction —
 // otherwise an empty title/author/year would sort first (as "" precedes
 // any real string/number) and clutter the top of an alphabetical list.
@@ -215,6 +249,7 @@ function sortSources(list: AiSourceRecord[], mode: SourceSortMode): AiSourceReco
 
 export function AiPanel() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const [draft, setDraft] = useState("");
   const [sourceQuery, setSourceQuery] = useState("");
   const [sourceSort, setSourceSort] = useState<SourceSortMode>("recent");
@@ -261,6 +296,15 @@ export function AiPanel() {
     sources.map((source) => [source.id, source.originalName]),
   );
 
+  // A turn's first assistant_chunk is what actually creates its message
+  // entry (see upsertAssistantChunk) — until then, a tool-call-heavy turn
+  // (searching, reading, verifying) leaves the last message as the user's
+  // own, with nothing on screen showing work is happening.
+  const isAwaitingFirstToken =
+    chatLoading &&
+    activeConversation?.messages[activeConversation.messages.length - 1]
+      ?.role === "user";
+
   useEffect(() => {
     void Promise.all([loadSources(), loadConversation(), loadPlanUsage()]);
   }, [loadConversation, loadPlanUsage, loadSources]);
@@ -270,6 +314,15 @@ export function AiPanel() {
       toast.error(error);
     }
   }, [error]);
+
+  // Follow the conversation: jump to the newest message whenever one is
+  // added (a sent user message) or streaming chunks grow the in-progress
+  // assistant reply, and again once the thinking indicator itself
+  // appears/disappears — otherwise a long reply can grow past the visible
+  // area with no cue to scroll down and see it.
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [activeConversation?.messages, chatLoading]);
 
   // The "Needs review" toggle button only renders while there's something to
   // review — once the last source is fixed, the button vanishes along with
@@ -600,6 +653,8 @@ export function AiPanel() {
               here.
             </div>
           )}
+          {isAwaitingFirstToken ? <ThinkingIndicator /> : null}
+          <div ref={messagesEndRef} />
         </div>
 
         <Separator />
