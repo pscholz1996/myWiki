@@ -232,6 +232,30 @@ export async function POST(req: Request) {
         >();
         const citations: AiCitation[] = [];
 
+        // Shared by both the normal completion path and the error path
+        // below — a turn that dies partway through (e.g. during citation
+        // verification) should still save whatever text was actually
+        // generated, not throw it away along with the failure.
+        const persistAssistantReply = async (): Promise<AiConversation> => {
+          const assistantMessage: AiMessage = {
+            id: randomUUID(),
+            role: "assistant",
+            content: assistantText.trim(),
+            createdAt: nowIso(),
+            usage,
+            citations: citations.length > 0 ? citations : undefined,
+          };
+          const nextConversation = appendMessage(conversation, assistantMessage);
+          nextConversation.usage = cumulativeUsage;
+          nextConversation.contextTokens = contextTokens ?? conversation.contextTokens;
+          await updateAiConversation(
+            projectDir,
+            nextConversation.id,
+            async () => nextConversation,
+          );
+          return nextConversation;
+        };
+
         try {
           for await (const sdkMessage of runOpenLatexChatTurn(
             projectDir,
@@ -301,32 +325,14 @@ export async function POST(req: Request) {
             }
           }
 
-          const assistantMessage: AiMessage = {
-            id: randomUUID(),
-            role: "assistant",
-            content: assistantText.trim(),
-            createdAt: nowIso(),
-            usage,
-            citations: citations.length > 0 ? citations : undefined,
-          };
-
-          const nextConversation = appendMessage(
-            conversation,
-            assistantMessage,
-          );
-          nextConversation.usage = cumulativeUsage;
-          nextConversation.contextTokens = contextTokens ?? conversation.contextTokens;
-          await updateAiConversation(
-            projectDir,
-            nextConversation.id,
-            async () => nextConversation,
-          );
+          const nextConversation = await persistAssistantReply();
           push("assistant_done", {
             conversationId: nextConversation.id,
             usage: cumulativeUsage,
             contextTokens: nextConversation.contextTokens,
-            content: assistantMessage.content,
-            citations: assistantMessage.citations,
+            content:
+              nextConversation.messages.at(-1)?.content ?? assistantText.trim(),
+            citations: citations.length > 0 ? citations : undefined,
           });
           if (turnErrorMessage) {
             push("error", {
@@ -336,11 +342,35 @@ export async function POST(req: Request) {
           }
           controller.close();
         } catch (error) {
+          // Never log-and-forget: a turn that dies mid-stream is otherwise
+          // invisible — the user's own message was already persisted before
+          // streaming started, but with nothing here, the assistant side
+          // stays silently blank forever (no saved reply, no server-side
+          // trace to diagnose from) even if real work — tokens, tool calls,
+          // partial text — already happened before the failure.
+          console.error("[ai/chat] Turn failed:", error);
+
+          const errorMessage =
+            turnErrorMessage ??
+            (error instanceof Error ? error.message : "Chat failed");
+
+          // Persist whatever text the model produced before it failed, so a
+          // late-turn error (e.g. during citation verification) doesn't
+          // throw away real, already-generated content along with it.
+          if (assistantText.trim()) {
+            try {
+              await persistAssistantReply();
+            } catch (persistError) {
+              console.error(
+                "[ai/chat] Failed to persist partial assistant message:",
+                persistError,
+              );
+            }
+          }
+
           push("error", {
             conversationId: conversation.id,
-            message:
-              turnErrorMessage ??
-              (error instanceof Error ? error.message : "Chat failed"),
+            message: errorMessage,
           });
           controller.close();
         }
