@@ -1,10 +1,10 @@
 {
-  "name": "@openlatex/root",
-  "description": "Local filesystem-backed LaTeX editor with live preview and Git integration",
+  "name": "@mywiki/root",
+  "description": "Local, AI-driven knowledge wiki over your own sources (papers, books, norms, slides)",
   "version": "0.0.1",
   "repository": {
     "type": "git",
-    "url": "https://github.com/xTazah/OpenLatex"
+    "url": "https://github.com/pscholz1996/myWiki"
   },
   "private": true,
   "workspaces": [
@@ -13,8 +13,7 @@
   ],
   "scripts": {
     "dev": "pnpm turbo dev",
-    "dev:web": "pnpm turbo dev --filter=@openlatex/web",
-    "dev:api": "pnpm turbo dev --filter=@openlatex/latex-api",
+    "dev:web": "pnpm turbo dev --filter=@mywiki/web",
     "lint": "pnpm exec biome check",
     "lint:fix": "pnpm exec biome check --fix"
   },

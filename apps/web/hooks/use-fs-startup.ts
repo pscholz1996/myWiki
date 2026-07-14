@@ -3,61 +3,41 @@
 import { useEffect, useRef } from "react";
 import { useFsStore, flattenFiles } from "@/stores/fs-store";
 import { useEditorStore } from "@/stores/editor-store";
-import { usePdfStore } from "@/stores/pdf-store";
+import { useViewerStore } from "@/stores/viewer-store";
 import { useGitStore } from "@/stores/git-store";
 import { startFsWatcher, type FsEvent } from "@/lib/fs/fs-watcher-client";
-import { compileLatex } from "@/lib/latex-compiler";
 
-const COMPILE_DEBOUNCE_MS = 500;
 const GIT_STATUS_DEBOUNCE_MS = 1000;
 const GIT_POLL_INTERVAL_MS = 3000;
+
+/** Pick the wiki's landing page: Home.md > index.md > README.md > first .md. */
+function pickHomePage(files: string[]): string | null {
+  const mdFiles = files.filter((p) => p.toLowerCase().endsWith(".md"));
+  const rootLevel = mdFiles.filter((p) => !p.includes("/"));
+  const byName = (name: string) =>
+    rootLevel.find((p) => p.toLowerCase() === name) ??
+    mdFiles.find((p) => p.toLowerCase().endsWith(`/${name}`));
+  return (
+    byName("home.md") ??
+    byName("index.md") ??
+    byName("readme.md") ??
+    rootLevel[0] ??
+    mdFiles[0] ??
+    null
+  );
+}
 
 export function useFsStartup() {
   const loadTree = useFsStore((s) => s.loadTree);
   const applyEvent = useFsStore((s) => s.applyEvent);
   const openFile = useEditorStore((s) => s.openFile);
   const startedRef = useRef(false);
-  const compileTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const gitStatusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const gitPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const dirtyRef = useRef(false);
 
   useEffect(() => {
     if (startedRef.current) return;
     startedRef.current = true;
-
-    const runCompile = async () => {
-      const pdf = usePdfStore.getState();
-      pdf.setIsCompiling(true);
-      try {
-        const result = await compileLatex();
-        pdf.setPdfData(result.data);
-        pdf.setBuildId(result.buildId);
-      } catch (error) {
-        pdf.setCompileError(
-          error instanceof Error ? error.message : "Compile failed",
-        );
-      } finally {
-        pdf.setIsCompiling(false);
-        if (dirtyRef.current) {
-          dirtyRef.current = false;
-          runCompile();
-        }
-      }
-    };
-
-    const scheduleCompile = () => {
-      const pdf = usePdfStore.getState();
-      if (pdf.isCompiling) {
-        dirtyRef.current = true;
-        return;
-      }
-      if (compileTimerRef.current) clearTimeout(compileTimerRef.current);
-      compileTimerRef.current = setTimeout(() => {
-        dirtyRef.current = false;
-        runCompile();
-      }, COMPILE_DEBOUNCE_MS);
-    };
 
     const scheduleGitRefresh = () => {
       if (gitStatusTimerRef.current) clearTimeout(gitStatusTimerRef.current);
@@ -74,44 +54,8 @@ export function useFsStartup() {
 
       const { tree } = useFsStore.getState();
       const files = flattenFiles(tree);
-
-      // Auto-select the root document: prefer root-level .tex files with common names.
-      const rootFiles = files.filter((p) => !p.includes("/"));
-      const main =
-        rootFiles.find((p) => p === "main.tex") ??
-        rootFiles.find((p) => p === "main_thesis.tex") ??
-        rootFiles.find((p) => p.endsWith(".tex")) ??
-        files.find((p) => p.endsWith(".tex"));
-      if (main) await openFile(main);
-
-      // Try to load the cached PDF first. If fresh, show it immediately.
-      // If 404 (stale or missing), fall back to a fresh compile.
-      const pdf = usePdfStore.getState();
-      try {
-        const res = await fetch("/api/pdf/cached", { cache: "no-store" });
-        if (res.ok) {
-          const buf = await res.arrayBuffer();
-          pdf.setPdfData(new Uint8Array(buf));
-          // Register the persisted SyncTeX data with the latex-api so sync works
-          // against the cached PDF without recompiling. Best-effort: if there's
-          // no cached .synctex.gz, sync will prompt to compile (prior behavior).
-          try {
-            const reg = await fetch("/api/synctex/register", {
-              method: "POST",
-            });
-            if (reg.ok) {
-              const { buildId } = (await reg.json()) as { buildId?: string };
-              if (buildId) pdf.setBuildId(buildId);
-            }
-          } catch {
-            // ignore — sync registration is best-effort
-          }
-          return;
-        }
-      } catch {
-        // ignore — fall through to compile
-      }
-      scheduleCompile();
+      const home = pickHomePage(files);
+      if (home) await openFile(home);
     })();
 
     const handler = (event: FsEvent) => {
@@ -124,13 +68,17 @@ export function useFsStartup() {
           editor.reloadFromDisk();
       }
 
-      // Any watched-file change → recompile + refresh git status.
+      const viewer = useViewerStore.getState();
+      if (viewer.path && event.path === viewer.path) {
+        if (event.type === "unlink") viewer.close();
+        else if (event.type === "change") viewer.reloadFromDisk();
+      }
+
       if (
         event.type === "add" ||
         event.type === "change" ||
         event.type === "unlink"
       ) {
-        scheduleCompile();
         scheduleGitRefresh();
       }
     };
@@ -149,8 +97,7 @@ export function useFsStartup() {
         prev.writePending &&
         !state.writePending
       ) {
-        // write just flushed to disk → compile (echo-suppressed, so watcher won't)
-        scheduleCompile();
+        // write just flushed to disk (echo-suppressed, so watcher won't fire)
         scheduleGitRefresh();
       }
     });
@@ -169,7 +116,6 @@ export function useFsStartup() {
       startedRef.current = false;
       handle.close();
       unsubEditor();
-      if (compileTimerRef.current) clearTimeout(compileTimerRef.current);
       if (gitStatusTimerRef.current) clearTimeout(gitStatusTimerRef.current);
       if (gitPollRef.current) clearInterval(gitPollRef.current);
     };

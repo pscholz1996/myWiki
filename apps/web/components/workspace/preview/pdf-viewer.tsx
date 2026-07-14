@@ -5,10 +5,6 @@ import { Document, Page, pdfjs } from "react-pdf";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
 import { Loader2Icon } from "lucide-react";
-import { toast } from "sonner";
-import { usePdfStore } from "@/stores/pdf-store";
-import { useEditorStore } from "@/stores/editor-store";
-import { describeOutcome, syncInverse } from "@/lib/synctex";
 
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
@@ -27,16 +23,6 @@ function scrollToPageEl(container: HTMLElement, pageNum: number) {
   if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
-/** Find the page element for a given page number. */
-function findPageEl(
-  container: HTMLElement,
-  pageNum: number,
-): HTMLElement | null {
-  return container.querySelector(
-    `[data-page-number="${pageNum}"]`,
-  ) as HTMLElement | null;
-}
-
 export function PdfViewer({
   data,
   scale,
@@ -52,23 +38,12 @@ export function PdfViewer({
   const savedScrollTop = useRef<number | null>(null);
   const [numPages, setNumPages] = useState(0);
   const pdfDocRef = useRef<pdfjs.PDFDocumentProxy | null>(null);
-  const synctexHighlight = usePdfStore((s) => s.synctexHighlight);
-  const setSynctexHighlight = usePdfStore((s) => s.setSynctexHighlight);
-  const goToLocation = useEditorStore((s) => s.goToLocation);
-  const [highlightRect, setHighlightRect] = useState<{
-    pageNum: number;
-    left: number;
-    top: number;
-    width: number;
-    height: number;
-    key: number;
-  } | null>(null);
 
   const file = useMemo(() => {
     // Capture current scroll position from the still-mounted previous PDF
     // before this render replaces it. After the new PDF loads we restore
     // this raw scrollTop — much simpler and more reliable than tracking
-    // page numbers, since pagination rarely shifts across a recompile.
+    // page numbers, since pagination rarely shifts across a reload.
     if (containerRef.current) {
       savedScrollTop.current = containerRef.current.scrollTop;
     }
@@ -82,7 +57,6 @@ export function PdfViewer({
       setNumPages(pdf.numPages);
       onLoadSuccess?.(pdf.numPages);
       pdfDocRef.current = pdf;
-      setHighlightRect(null);
 
       // Restore the raw scroll position we captured before the swap. Poll
       // because pages render asynchronously: scrollTop is clamped to
@@ -151,158 +125,12 @@ export function PdfViewer({
       .catch(() => {});
   }, []);
 
-  // Inverse-sync on double click: PDF coord → editor jump.
-  const handleDoubleClick = useCallback(
-    async (e: React.MouseEvent) => {
-      const target = e.target as HTMLElement;
-      const pageEl = target.closest("[data-page-number]") as HTMLElement | null;
-      if (!pageEl || !pdfDocRef.current) return;
-      const pageNum = parseInt(
-        pageEl.getAttribute("data-page-number") ?? "0",
-        10,
-      );
-      if (!pageNum) return;
-
-      let pdfPage: pdfjs.PDFPageProxy;
-      try {
-        pdfPage = await pdfDocRef.current.getPage(pageNum);
-      } catch {
-        // The document was replaced (e.g. a recompile landed) between the
-        // click and this await — pdf.js throws from its internals rather
-        // than resolving to null, so there's nothing meaningful to inverse-
-        // sync against. The user can just double-click again once the new
-        // PDF has settled.
-        return;
-      }
-      // Page view box: [x0, y0, x1, y1] in PDF points.
-      const view = pdfPage.view;
-      const pdfWidthPts = view[2] - view[0];
-      const pdfHeightPts = view[3] - view[1];
-      const pageRect = pageEl.getBoundingClientRect();
-      const pxPerPointX = pageRect.width / pdfWidthPts;
-      const pxPerPointY = pageRect.height / pdfHeightPts;
-      const xPts = (e.clientX - pageRect.left) / pxPerPointX;
-      const yPts = (e.clientY - pageRect.top) / pxPerPointY;
-
-      const outcome = await syncInverse(pageNum, xPts, yPts);
-      const message = describeOutcome(outcome);
-      if (outcome.kind === "ok") {
-        await goToLocation(
-          outcome.value.file,
-          outcome.value.line,
-          outcome.value.column,
-        );
-      } else if (message) {
-        toast(message);
-      }
-    },
-    [goToLocation],
-  );
-
-  // Page-only scroll (sidebar sync-scroll, outline). For SyncTeX forward
-  // sync we do precise top-aligned scrolling in the highlight effect below
-  // so it lands directly on the target line, not the page top.
+  // Page scroll requests (citation jumps, outline clicks).
   useEffect(() => {
     if (!scrollToPage || !containerRef.current || numPages === 0) return;
-    // If a synctex highlight is also pending, the highlight effect handles
-    // the scroll (with line-level precision) — don't double-scroll here.
-    if (synctexHighlight && synctexHighlight.page === scrollToPage) return;
-    if (containerRef.current) {
-      scrollToPageEl(containerRef.current, scrollToPage);
-    }
+    scrollToPageEl(containerRef.current, scrollToPage);
     onScrollDone?.();
-  }, [scrollToPage, numPages, onScrollDone, synctexHighlight]);
-
-  // SyncTeX forward hit → scroll precisely to the target line and flash it.
-  useEffect(() => {
-    if (!synctexHighlight || !containerRef.current || numPages === 0) return;
-    const { page, x, y, width, height, key } = synctexHighlight;
-
-    let cancelled = false;
-    let attempts = 0;
-    const place = async () => {
-      if (cancelled || !containerRef.current) return;
-      const container = containerRef.current;
-      const pageEl = findPageEl(container, page);
-      const doc = pdfDocRef.current;
-      if (!pageEl || pageEl.getBoundingClientRect().width === 0 || !doc) {
-        if (attempts++ < 40) requestAnimationFrame(place);
-        return;
-      }
-      let pdfPage: pdfjs.PDFPageProxy;
-      try {
-        pdfPage = await doc.getPage(page);
-      } catch {
-        // doc was destroyed between being captured above and this await
-        // resolving (a recompile can swap in a new PDF document mid-flight)
-        // — pdf.js throws from its internals rather than resolving to null.
-        // Retry through the same bounded loop: by the next frame,
-        // pdfDocRef.current should already point at the new, live document.
-        if (attempts++ < 40) requestAnimationFrame(place);
-        return;
-      }
-      if (cancelled) return;
-      const view = pdfPage.view;
-      const pdfWidthPts = view[2] - view[0];
-      const pdfHeightPts = view[3] - view[1];
-      const pageRect = pageEl.getBoundingClientRect();
-      const containerRect = container.getBoundingClientRect();
-      const pxPerPointX = pageRect.width / pdfWidthPts;
-      const pxPerPointY = pageRect.height / pdfHeightPts;
-
-      // SyncTeX y is the baseline; the box extends upward by `height`.
-      const leftPx = x * pxPerPointX;
-      const topPx = (y - height) * pxPerPointY;
-      const widthPx = Math.max(width * pxPerPointX, 4);
-      const heightPx = Math.max(height * pxPerPointY, 8);
-      if (cancelled) return;
-      setHighlightRect({
-        pageNum: page,
-        left: leftPx,
-        top: topPx,
-        width: widthPx,
-        height: heightPx,
-        key,
-      });
-
-      // Scroll the rect into view unless it's already comfortably visible.
-      // pageRect.top is the page's top relative to the viewport; the rect's
-      // viewport-relative top is pageRect.top + topPx.
-      const rectTopInViewport = pageRect.top + topPx;
-      const rectBottomInViewport = rectTopInViewport + heightPx;
-      const padding = 40; // px; gives the line some breathing room
-      const above = rectTopInViewport - containerRect.top < padding;
-      const below =
-        rectBottomInViewport - containerRect.top >
-        containerRect.height - padding;
-      if (above || below) {
-        // Align rect ~30% from the top — the same instinct as `y: "center"`
-        // in CodeMirror.
-        const targetTopInContainer =
-          rectTopInViewport - containerRect.top + container.scrollTop;
-        container.scrollTo({
-          top: targetTopInContainer - containerRect.height * 0.3,
-          behavior: "smooth",
-        });
-      }
-      onScrollDone?.();
-    };
-    requestAnimationFrame(place);
-
-    // Clear after the CSS animation length so re-trigger of identical coords
-    // (with a new key) still produces a flash.
-    const clearTimer = setTimeout(() => {
-      if (!cancelled) {
-        setHighlightRect(null);
-        setSynctexHighlight(null);
-      }
-    }, 1700);
-
-    return () => {
-      cancelled = true;
-      clearTimeout(clearTimer);
-    };
-  }, [synctexHighlight, numPages, setSynctexHighlight, onScrollDone]);
+  }, [scrollToPage, numPages, onScrollDone]);
 
   // Ctrl+scroll zoom.
   useEffect(() => {
@@ -321,11 +149,7 @@ export function PdfViewer({
 
   return (
     <div ref={containerRef} className="flex-1 overflow-auto">
-      <div
-        className="flex flex-col items-center gap-4 p-4"
-        onClick={handleClick}
-        onDoubleClick={handleDoubleClick}
-      >
+      <div className="flex flex-col items-center gap-4 p-4" onClick={handleClick}>
         <Document
           file={file}
           onLoadSuccess={handleLoadSuccess}
@@ -337,35 +161,18 @@ export function PdfViewer({
             </div>
           }
         >
-          {Array.from({ length: numPages }, (_, i) => {
-            const pageNum = i + 1;
-            const showHighlight =
-              highlightRect && highlightRect.pageNum === pageNum;
-            return (
-              <div key={pageNum} className="relative mb-4">
-                <Page
-                  pageNumber={pageNum}
-                  scale={scale}
-                  renderTextLayer={true}
-                  renderAnnotationLayer={true}
-                  className="shadow-lg"
-                  onLoadSuccess={i === 0 ? handlePageLoadSuccess : undefined}
-                />
-                {showHighlight && (
-                  <div
-                    key={highlightRect.key}
-                    className="synctex-flash pointer-events-none absolute"
-                    style={{
-                      left: highlightRect.left,
-                      top: highlightRect.top,
-                      width: highlightRect.width,
-                      height: highlightRect.height,
-                    }}
-                  />
-                )}
-              </div>
-            );
-          })}
+          {Array.from({ length: numPages }, (_, i) => (
+            <div key={i + 1} className="relative mb-4">
+              <Page
+                pageNumber={i + 1}
+                scale={scale}
+                renderTextLayer={true}
+                renderAnnotationLayer={true}
+                className="shadow-lg"
+                onLoadSuccess={i === 0 ? handlePageLoadSuccess : undefined}
+              />
+            </div>
+          ))}
         </Document>
       </div>
     </div>

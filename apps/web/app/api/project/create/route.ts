@@ -6,19 +6,18 @@ import { readCurrentProject, setCurrentProject } from "@/lib/project/config";
 
 export const dynamic = "force-dynamic";
 
-// A genuinely blank starting point — the user asked for a document that
-// compiles to a blank page, not a pre-filled template they'd have to strip
-// out before writing their own \documentclass/preamble choices. A body with
-// truly nothing in it doesn't produce a blank PAGE, it produces NO page at
-// all ("No pages of output") — pdfTeX never ships a page unless something,
-// however invisible, lands on it. \mbox{} is that something.
-const BLANK_MAIN_TEX = `\\documentclass{article}
+// New wikis start with the canonical folder layout plus a Home page, so the
+// app has something to open and the structure documents itself.
+const HOME_MD = `# Home
 
-\\begin{document}
-% \\mbox{} makes this compile to one blank page — replace it with your text.
-\\mbox{}
-\\end{document}
+Welcome to your wiki.
+
+- Drop PDFs, slides, and other sources into \`sources/\` to ingest them.
+- Ingested, searchable copies live in \`library/\`.
+- Wiki pages live in \`wiki/\` — link between them with [[wikilinks]].
 `;
+
+const WIKI_DIRS = ["sources", "library", "wiki"] as const;
 
 export async function POST(req: Request) {
   let body: { parentPath?: unknown; name?: unknown };
@@ -110,7 +109,10 @@ export async function POST(req: Request) {
       await fs.mkdir(projectPath, { recursive: true });
     }
 
-    await fs.writeFile(path.join(projectPath, "main.tex"), BLANK_MAIN_TEX, "utf8");
+    for (const dir of WIKI_DIRS) {
+      await fs.mkdir(path.join(projectPath, dir), { recursive: true });
+    }
+    await fs.writeFile(path.join(projectPath, "Home.md"), HOME_MD, "utf8");
 
     setCurrentProject(projectPath);
   } catch (error) {

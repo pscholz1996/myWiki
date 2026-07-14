@@ -12,8 +12,6 @@ import {
   Decoration,
   type DecorationSet,
 } from "@codemirror/view";
-import { toast } from "sonner";
-import { describeOutcome, syncForward } from "@/lib/synctex";
 import {
   defaultKeymap,
   history,
@@ -30,20 +28,19 @@ import {
   findNext,
   findPrevious,
 } from "@codemirror/search";
-import { latex } from "codemirror-lang-latex";
+import { markdown } from "@codemirror/lang-markdown";
 import { useEditorStore } from "@/stores/editor-store";
-import { usePdfStore } from "@/stores/pdf-store";
 import { EditorToolbar } from "./editor-toolbar";
 import { ImagePreview } from "./image-preview";
 import { SearchPanel } from "./search-panel";
 
 /** StateEffect to set or clear the line-flash decoration in CodeMirror. */
 const setFlashLineEffect = StateEffect.define<number | null>();
-const lineFlashDeco = Decoration.line({ class: "synctex-line-flash" });
+const lineFlashDeco = Decoration.line({ class: "goto-line-flash" });
 
 /**
- * StateField that paints a single line with `.synctex-line-flash` when an
- * inverse-search jump lands there. The CSS fades the highlight; the field is
+ * StateField that paints a single line with `.goto-line-flash` when a
+ * goto-location jump lands there. The CSS fades the highlight; the field is
  * cleared from React via a timeout (clearFlashLine).
  */
 const lineFlashField = StateField.define<DecorationSet>({
@@ -67,54 +64,34 @@ const lineFlashField = StateField.define<DecorationSet>({
 });
 
 interface StickyItem {
-  type: "section" | "begin";
-  name: string;
+  level: number;
   content: string;
   html: string;
   line: number;
 }
 
-interface ParsedLine {
-  type: "section" | "begin" | "end";
-  name: string;
+interface ParsedHeading {
+  level: number;
   content: string;
   line: number;
 }
 
-function parseLatexStructure(content: string): ParsedLine[] {
+/** ATX headings (`#` … `######`), skipping fenced code blocks. */
+function parseMarkdownStructure(content: string): ParsedHeading[] {
   const lines = content.split("\n");
-  const result: ParsedLine[] = [];
-  const sectionRegex =
-    /\\(part|chapter|section|subsection|subsubsection)\*?\s*\{[^}]*\}/;
-  const beginRegex = /\\begin\{([^}]+)\}/;
-  const endRegex = /\\end\{([^}]+)\}/;
+  const result: ParsedHeading[] = [];
+  let inFence = false;
 
   lines.forEach((lineContent, index) => {
-    const sectionMatch = lineContent.match(sectionRegex);
-    if (sectionMatch) {
-      result.push({
-        type: "section",
-        name: sectionMatch[1],
-        content: lineContent,
-        line: index + 1,
-      });
+    if (/^\s*(```|~~~)/.test(lineContent)) {
+      inFence = !inFence;
       return;
     }
-    const beginMatch = lineContent.match(beginRegex);
-    if (beginMatch) {
+    if (inFence) return;
+    const match = lineContent.match(/^(#{1,6})\s+\S/);
+    if (match) {
       result.push({
-        type: "begin",
-        name: beginMatch[1],
-        content: lineContent,
-        line: index + 1,
-      });
-      return;
-    }
-    const endMatch = lineContent.match(endRegex);
-    if (endMatch) {
-      result.push({
-        type: "end",
-        name: endMatch[1],
+        level: match[1].length,
         content: lineContent,
         line: index + 1,
       });
@@ -123,58 +100,28 @@ function parseLatexStructure(content: string): ParsedLine[] {
   return result;
 }
 
+/** The chain of headings enclosing `currentLine` (e.g. H1 › H2 › H3). */
 function getStickyLines(
-  parsedLines: ParsedLine[],
+  headings: ParsedHeading[],
   currentLine: number,
 ): StickyItem[] {
   const stack: StickyItem[] = [];
-  const sectionLevelMap: Record<string, number> = {
-    part: 0,
-    chapter: 1,
-    section: 2,
-    subsection: 3,
-    subsubsection: 4,
-  };
-
-  for (const item of parsedLines) {
+  for (const item of headings) {
     if (item.line > currentLine) break;
-    if (item.type === "section") {
-      const level = sectionLevelMap[item.name] ?? 2;
-      while (
-        stack.length > 0 &&
-        stack[stack.length - 1].type === "section" &&
-        sectionLevelMap[stack[stack.length - 1].name] >= level
-      ) {
-        stack.pop();
-      }
-      stack.push({
-        type: "section",
-        name: item.name,
-        content: item.content,
-        html: "",
-        line: item.line,
-      });
-    } else if (item.type === "begin") {
-      stack.push({
-        type: "begin",
-        name: item.name,
-        content: item.content,
-        html: "",
-        line: item.line,
-      });
-    } else if (item.type === "end") {
-      for (let i = stack.length - 1; i >= 0; i--) {
-        if (stack[i].type === "begin" && stack[i].name === item.name) {
-          stack.splice(i, 1);
-          break;
-        }
-      }
+    while (stack.length > 0 && stack[stack.length - 1].level >= item.level) {
+      stack.pop();
     }
+    stack.push({
+      level: item.level,
+      content: item.content,
+      html: "",
+      line: item.line,
+    });
   }
   return stack;
 }
 
-export function LatexEditor() {
+export function MarkdownEditor() {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
 
@@ -189,63 +136,7 @@ export function LatexEditor() {
   const flashLine = useEditorStore((s) => s.flashLine);
   const clearFlashLine = useEditorStore((s) => s.clearFlashLine);
 
-  const isTexFile = activeKind === "text";
-
-  // Forward-sync trigger. Pulls active path from a ref so the keymap callback
-  // (registered once when the editor mounts) reads the current value.
-  const activePathRef = useRef<string | null>(activePath);
-  useEffect(() => {
-    activePathRef.current = activePath;
-  }, [activePath]);
-
-  /**
-   * Auto-sync fires only on typing (doc changes) and explicit double-click —
-   * never on plain caret motion / single click. The debounce timer coalesces
-   * rapid edits into one forward-sync.
-   */
-  const autoSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const triggerForwardSync = (
-    view: EditorView,
-    opts?: { silent?: boolean },
-  ) => {
-    const path = activePathRef.current;
-    if (!path) return;
-    const pos = view.state.selection.main.head;
-    const line = view.state.doc.lineAt(pos);
-    const column = pos - line.from;
-    syncForward(path, line.number, column).then((outcome) => {
-      if (outcome.kind === "ok") {
-        const { page, h, v, width, height } = outcome.value;
-        usePdfStore.getState().setSynctexHighlight({
-          page,
-          x: h,
-          y: v,
-          width,
-          height,
-          key: Date.now(),
-        });
-        usePdfStore.getState().setScrollToPage(page);
-        return;
-      }
-      // For auto-sync (silent mode), still surface real configuration errors
-      // (synctex disabled, build evicted, network) — only swallow the routine
-      // "no match" case. Otherwise users see no scrolling and have no idea why.
-      const isRoutineMiss = outcome.kind === "no-match";
-      if (!opts?.silent || !isRoutineMiss) {
-        const msg = describeOutcome(outcome);
-        if (msg) toast(msg);
-      }
-    });
-  };
-
-  const scheduleAutoSync = (view: EditorView) => {
-    if (autoSyncTimerRef.current) clearTimeout(autoSyncTimerRef.current);
-    autoSyncTimerRef.current = setTimeout(() => {
-      autoSyncTimerRef.current = null;
-      triggerForwardSync(view, { silent: true });
-    }, 200);
-  };
+  const isTextFile = activeKind === "text";
 
   const [imageScale, setImageScale] = useState(0.5);
   const [currentLine, setCurrentLine] = useState(1);
@@ -258,14 +149,14 @@ export function LatexEditor() {
   const [matchCount, setMatchCount] = useState(0);
   const [currentMatch, setCurrentMatch] = useState(0);
 
-  const parsedLines = useMemo(() => parseLatexStructure(buffer), [buffer]);
+  const parsedHeadings = useMemo(() => parseMarkdownStructure(buffer), [buffer]);
   const stickyLines = useMemo(() => {
-    const items = getStickyLines(parsedLines, currentLine);
+    const items = getStickyLines(parsedHeadings, currentLine);
     return items.map((item) => ({
       ...item,
       html: lineHtmlCache[item.line] || "",
     }));
-  }, [parsedLines, currentLine, lineHtmlCache]);
+  }, [parsedHeadings, currentLine, lineHtmlCache]);
 
   const isSearchOpenRef = useRef(false);
   useEffect(() => {
@@ -324,28 +215,12 @@ export function LatexEditor() {
   };
 
   useEffect(() => {
-    if (!containerRef.current || !isTexFile) return;
+    if (!containerRef.current || !isTextFile) return;
 
     const updateListener = EditorView.updateListener.of((update) => {
       if (update.docChanged) {
         setBuffer(update.state.doc.toString());
       }
-
-      // Auto-forward-sync on edits only. Plain caret motion / single click /
-      // arrow keys deliberately do NOT sync — that would yank the PDF around as
-      // the user navigates. Jumping to a spot on demand is done by double-click
-      // (see dblclick handler below) or the Ctrl-Alt-J shortcut.
-      if (update.docChanged) {
-        scheduleAutoSync(update.view);
-      }
-    });
-
-    // Double-click in the editor jumps the PDF to that location.
-    const dblclickListener = EditorView.domEventHandlers({
-      dblclick: (_, view) => {
-        triggerForwardSync(view);
-        return false; // let CodeMirror keep its default word-selection behavior
-      },
     });
 
     const scrollListener = EditorView.domEventHandlers({
@@ -373,14 +248,6 @@ export function LatexEditor() {
 
     const editorKeymap = Prec.highest(
       keymap.of([
-        {
-          key: "Ctrl-Alt-j",
-          mac: "Cmd-Alt-j",
-          run: (view) => {
-            triggerForwardSync(view);
-            return true;
-          },
-        },
         {
           key: "Enter",
           run: (view) => {
@@ -430,7 +297,7 @@ export function LatexEditor() {
         highlightActiveLineGutter(),
         history(),
         keymap.of([...defaultKeymap, ...historyKeymap]),
-        latex(),
+        markdown(),
         oneDark,
         syntaxHighlighting(oneDarkHighlightStyle),
         search(),
@@ -438,7 +305,6 @@ export function LatexEditor() {
         lineFlashField,
         updateListener,
         scrollListener,
-        dblclickListener,
         EditorView.lineWrapping,
         scrollPastEnd(),
         EditorView.theme({
@@ -473,16 +339,12 @@ export function LatexEditor() {
     viewRef.current = view;
 
     return () => {
-      if (autoSyncTimerRef.current) {
-        clearTimeout(autoSyncTimerRef.current);
-        autoSyncTimerRef.current = null;
-      }
       view.destroy();
       viewRef.current = null;
     };
-  }, [activePath, isTexFile, setBuffer]);
+  }, [activePath, isTextFile, setBuffer]);
 
-  // Inverse-sync target: move cursor to (line, column) and scroll into view.
+  // Goto-location target: move cursor to (line, column) and scroll into view.
   useEffect(() => {
     if (!pendingGoTo) return;
     const view = viewRef.current;
@@ -492,9 +354,6 @@ export function LatexEditor() {
     const line = doc.line(lineNum);
     const column = Math.max(0, Math.min(pendingGoTo.column, line.length));
     const pos = line.from + column;
-    // No auto-sync guard needed here: selection changes no longer trigger
-    // forward-sync (only edits and double-click do), so moving the cursor for
-    // an inverse jump won't bounce the PDF back.
     view.dispatch({
       selection: { anchor: pos },
       effects: EditorView.scrollIntoView(pos, { y: "center" }),
@@ -503,7 +362,7 @@ export function LatexEditor() {
     clearPendingGoTo();
   }, [pendingGoTo, clearPendingGoTo]);
 
-  // Inverse-sync flash: paint a fading background on the target line.
+  // Goto-location flash: paint a fading background on the target line.
   useEffect(() => {
     if (!flashLine) return;
     const view = viewRef.current;
@@ -520,7 +379,7 @@ export function LatexEditor() {
   // Sync external buffer changes (e.g. watcher-driven reload) into CodeMirror.
   useEffect(() => {
     const view = viewRef.current;
-    if (!view || !isTexFile) return;
+    if (!view || !isTextFile) return;
     const currentContent = view.state.doc.toString();
     if (currentContent !== buffer) {
       const prevSelection = view.state.selection.main;
@@ -531,7 +390,7 @@ export function LatexEditor() {
         selection: { anchor: clampedAnchor },
       });
     }
-  }, [buffer, isTexFile]);
+  }, [buffer, isTextFile]);
 
   if (!activePath) {
     return (

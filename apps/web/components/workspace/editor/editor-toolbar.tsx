@@ -12,13 +12,11 @@ import {
   FunctionSquareIcon,
   FileTextIcon,
   ImageIcon,
+  LinkIcon,
   MinusIcon,
   PlusIcon,
-  CrosshairIcon,
+  QuoteIcon,
 } from "lucide-react";
-import { toast } from "sonner";
-import { describeOutcome, syncForward } from "@/lib/synctex";
-import { usePdfStore } from "@/stores/pdf-store";
 import { TooltipIconButton } from "@/components/ui/tooltip-icon-button";
 import { Button } from "@/components/ui/button";
 import {
@@ -43,19 +41,19 @@ const ZOOM_OPTIONS = [
 
 interface EditorToolbarProps {
   editorView: RefObject<EditorView | null>;
-  fileType?: "tex" | "image";
+  fileType?: "text" | "image";
   imageScale?: number;
   onImageScaleChange?: (scale: number) => void;
 }
 
 export function EditorToolbar({
   editorView,
-  fileType = "tex",
+  fileType = "text",
   imageScale = 1,
   onImageScaleChange,
 }: EditorToolbarProps) {
   const activePath = useEditorStore((s) => s.activePath);
-  const fileName = activePath?.split("/").pop() ?? "document.tex";
+  const fileName = activePath?.split("/").pop() ?? "untitled.md";
 
   const insertText = (before: string, after: string = "") => {
     const view = editorView.current;
@@ -82,32 +80,21 @@ export function EditorToolbar({
     insertText(wrapper, wrapper);
   };
 
+  /** Prefix the current line (headings, lists, quotes). */
+  const prefixLine = (prefix: string) => {
+    const view = editorView.current;
+    if (!view) return;
+    const { from } = view.state.selection.main;
+    const line = view.state.doc.lineAt(from);
+    view.dispatch({
+      changes: { from: line.from, to: line.from, insert: prefix },
+      selection: { anchor: from + prefix.length },
+    });
+    view.focus();
+  };
+
   const zoomIn = () => onImageScaleChange?.(Math.min(4, imageScale + 0.25));
   const zoomOut = () => onImageScaleChange?.(Math.max(0.25, imageScale - 0.25));
-
-  const handleSyncToPdf = async () => {
-    const view = editorView.current;
-    if (!view || !activePath) return;
-    const pos = view.state.selection.main.head;
-    const line = view.state.doc.lineAt(pos);
-    const column = pos - line.from;
-    const outcome = await syncForward(activePath, line.number, column);
-    if (outcome.kind === "ok") {
-      const { page, h, v, width, height } = outcome.value;
-      usePdfStore.getState().setSynctexHighlight({
-        page,
-        x: h,
-        y: v,
-        width,
-        height,
-        key: Date.now(),
-      });
-      usePdfStore.getState().setScrollToPage(page);
-    } else {
-      const msg = describeOutcome(outcome);
-      if (msg) toast(msg);
-    }
-  };
 
   if (fileType === "image") {
     return (
@@ -164,44 +151,35 @@ export function EditorToolbar({
         {fileName}
       </span>
       <div className="mx-2 h-4 w-px bg-border" />
-      <TooltipIconButton
-        tooltip="Bold (\\textbf)"
-        onClick={() => insertText("\\textbf{", "}")}
-      >
+      <TooltipIconButton tooltip="Bold" onClick={() => wrapSelection("**")}>
         <BoldIcon className="size-4" />
       </TooltipIconButton>
-      <TooltipIconButton
-        tooltip="Italic (\\textit)"
-        onClick={() => insertText("\\textit{", "}")}
-      >
+      <TooltipIconButton tooltip="Italic" onClick={() => wrapSelection("*")}>
         <ItalicIcon className="size-4" />
       </TooltipIconButton>
-      <TooltipIconButton
-        tooltip="Code (\\texttt)"
-        onClick={() => insertText("\\texttt{", "}")}
-      >
+      <TooltipIconButton tooltip="Inline code" onClick={() => wrapSelection("`")}>
         <CodeIcon className="size-4" />
       </TooltipIconButton>
       <div className="mx-2 h-4 w-px bg-border" />
-      <TooltipIconButton
-        tooltip="Section"
-        onClick={() => insertText("\\section{", "}")}
-      >
+      <TooltipIconButton tooltip="Heading 1" onClick={() => prefixLine("# ")}>
         <Heading1Icon className="size-4" />
       </TooltipIconButton>
-      <TooltipIconButton
-        tooltip="Subsection"
-        onClick={() => insertText("\\subsection{", "}")}
-      >
+      <TooltipIconButton tooltip="Heading 2" onClick={() => prefixLine("## ")}>
         <Heading2Icon className="size-4" />
       </TooltipIconButton>
-      <TooltipIconButton
-        tooltip="List item"
-        onClick={() => insertText("\\item ")}
-      >
+      <TooltipIconButton tooltip="List item" onClick={() => prefixLine("- ")}>
         <ListIcon className="size-4" />
       </TooltipIconButton>
+      <TooltipIconButton tooltip="Quote" onClick={() => prefixLine("> ")}>
+        <QuoteIcon className="size-4" />
+      </TooltipIconButton>
       <div className="mx-2 h-4 w-px bg-border" />
+      <TooltipIconButton
+        tooltip="Link"
+        onClick={() => insertText("[", "](url)")}
+      >
+        <LinkIcon className="size-4" />
+      </TooltipIconButton>
       <TooltipIconButton
         tooltip="Inline math ($...$)"
         onClick={() => wrapSelection("$")}
@@ -209,17 +187,10 @@ export function EditorToolbar({
         <FunctionSquareIcon className="size-4" />
       </TooltipIconButton>
       <TooltipIconButton
-        tooltip="Display math (\\[...\\])"
-        onClick={() => insertText("\\[\n  ", "\n\\]")}
+        tooltip="Code block"
+        onClick={() => insertText("```\n", "\n```")}
       >
-        <span className="font-mono text-xs">∫</span>
-      </TooltipIconButton>
-      <div className="mx-2 h-4 w-px bg-border" />
-      <TooltipIconButton
-        tooltip="Jump to PDF (Ctrl+Alt+J)"
-        onClick={handleSyncToPdf}
-      >
-        <CrosshairIcon className="size-4" />
+        <span className="font-mono text-xs">{"{}"}</span>
       </TooltipIconButton>
     </div>
   );

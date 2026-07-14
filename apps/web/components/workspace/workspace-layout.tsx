@@ -4,8 +4,8 @@ import { useState } from "react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { ArrowLeftRightIcon } from "lucide-react";
 import { Sidebar } from "./sidebar/sidebar";
-import { LatexEditor } from "./editor/latex-editor";
-import { PdfPreview } from "./preview/pdf-preview";
+import { MarkdownEditor } from "./editor/markdown-editor";
+import { SourceViewer } from "./preview/source-viewer";
 import { AiPanel } from "./ai/ai-panel";
 import { useFsStartup } from "@/hooks/use-fs-startup";
 import { ProjectSwitcherButton } from "@/components/project/project-switcher-button";
@@ -22,13 +22,13 @@ export function WorkspaceLayout({ current, recent }: Props) {
 
   const editorPanel = (
     <Panel defaultSize={42.5} minSize={25}>
-      <LatexEditor />
+      <MarkdownEditor />
     </Panel>
   );
 
   const previewPanel = (
     <Panel defaultSize={42.5} minSize={25}>
-      <PdfPreview />
+      <SourceViewer />
     </Panel>
   );
 
@@ -57,7 +57,7 @@ export function WorkspaceLayout({ current, recent }: Props) {
           <button
             onClick={() => setSwapped((s) => !s)}
             className="absolute top-1/2 left-1/2 z-10 flex size-6 -translate-x-1/2 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full border bg-background opacity-0 shadow-sm transition-opacity hover:bg-accent group-hover:opacity-100"
-            title="Swap editor and preview"
+            title="Swap editor and source viewer"
           >
             <ArrowLeftRightIcon className="size-3 text-foreground" />
           </button>

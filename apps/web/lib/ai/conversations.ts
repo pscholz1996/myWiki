@@ -3,7 +3,7 @@ import path from "node:path";
 import { ensureAiWorkspace } from "@/lib/ai/knowledge-base";
 import type { AiConversation, AiMessage, AiUsage } from "@/lib/ai/types";
 
-const CONVERSATIONS_DIR = [".openlatex", "ai", "conversations"] as const;
+const CONVERSATIONS_DIR = [".mywiki", "ai", "conversations"] as const;
 
 function nowIso(): string {
   return new Date().toISOString();

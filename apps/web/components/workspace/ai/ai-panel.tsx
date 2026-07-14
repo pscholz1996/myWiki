@@ -452,7 +452,7 @@ export function AiPanel() {
             <div>
               <div className="font-medium text-sm">Knowledge Base</div>
               <div className="text-muted-foreground text-xs">
-                Upload PDFs or notes. They are copied into .openlatex/ai/sources
+                Upload PDFs or notes. They are copied into .mywiki/ai/sources
                 and indexed automatically.
               </div>
             </div>

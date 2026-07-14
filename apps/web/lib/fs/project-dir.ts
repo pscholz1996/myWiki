@@ -12,7 +12,7 @@ export class NoProjectSelectedError extends Error {
 /**
  * Returns the absolute, realpath-resolved path of the currently-selected
  * project. Throws NoProjectSelectedError if none is selected.
- * Ensures `.openlatex/` and `.openlatex/.gitignore` exist on every call.
+ * Ensures `.mywiki/` and `.mywiki/.gitignore` exist on every call.
  *
  * Deliberately uncached: this used to memoize its result in a module-level
  * variable, invalidated by resetProjectDirCache() when the project changed.
@@ -43,12 +43,12 @@ export function getProjectDir(): string {
 
   const real = fs.realpathSync(resolved);
 
-  const buildDir = path.join(real, ".openlatex");
+  const buildDir = path.join(real, ".mywiki");
   if (!fs.existsSync(buildDir)) {
     fs.mkdirSync(buildDir, { recursive: true });
   }
   const gitignore = path.join(buildDir, ".gitignore");
-  // Ignore everything under .openlatex/ (compile cache, the AI index,
+  // Ignore everything under .mywiki/ (the AI index,
   // conversation history — all regenerable/ephemeral) EXCEPT the knowledge
   // base's raw sources, which are real user data (uploaded PDFs/notes) and
   // should be versioned in the project's own repo like any other file.
@@ -69,17 +69,26 @@ export function getProjectDir(): string {
   return real;
 }
 
-export const BUILD_DIR_NAME = ".openlatex";
+export const BUILD_DIR_NAME = ".mywiki";
 export const EXCLUDED_DIRS = new Set([".git", "node_modules", BUILD_DIR_NAME]);
 export const ALLOWED_EXTS = new Set([
-  ".tex",
-  ".bib",
-  ".cls",
-  ".sty",
+  ".md",
+  ".markdown",
   ".txt",
+  ".yaml",
+  ".yml",
+  ".bib",
   ".png",
   ".jpg",
   ".jpeg",
+  ".svg",
   ".pdf",
 ]);
-export const TEXT_EXTS = new Set([".tex", ".bib", ".cls", ".sty", ".txt"]);
+export const TEXT_EXTS = new Set([
+  ".md",
+  ".markdown",
+  ".txt",
+  ".yaml",
+  ".yml",
+  ".bib",
+]);

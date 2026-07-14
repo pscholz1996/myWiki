@@ -58,9 +58,9 @@ export function WelcomeScreen({ recent }: WelcomeScreenProps) {
       <div className="relative flex h-full w-full items-center justify-center bg-background">
         <div className="w-full max-w-lg space-y-6 px-6">
           <div className="space-y-1">
-            <h1 className="font-semibold text-2xl">OpenLaTex</h1>
+            <h1 className="font-semibold text-2xl">myWiki</h1>
             <p className="text-muted-foreground text-sm">
-              Open a folder that contains your LaTeX project to get started.
+              Open the folder that contains your wiki to get started.
             </p>
           </div>
 
@@ -74,7 +74,7 @@ export function WelcomeScreen({ recent }: WelcomeScreenProps) {
             <Input
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="C:\path\to\your\latex-project"
+              placeholder="/path/to/your/wiki"
               disabled={submitting}
               autoFocus
             />
@@ -137,12 +137,10 @@ export function WelcomeScreen({ recent }: WelcomeScreenProps) {
       </div>
 
       <footer className="absolute right-0 bottom-0 left-0 flex items-center justify-center gap-2 py-4 text-muted-foreground text-xs">
-        <span>OpenLaTex v{packageJson.version}</span>
-        <span>·</span>
-        <span>by xTazah</span>
+        <span>myWiki v{packageJson.version}</span>
         <span>·</span>
         <a
-          href="https://github.com/xTazah/OpenLatex"
+          href="https://github.com/pscholz1996"
           target="_blank"
           rel="noopener noreferrer"
           className="flex items-center gap-1 transition-colors hover:text-foreground"

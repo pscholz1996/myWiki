@@ -19,7 +19,7 @@ export function _setConfigPathForTesting(p: string | null): void {
 
 function configPath(): string {
   if (configPathOverride) return configPathOverride;
-  return path.join(os.homedir(), ".openlatex", "config.json");
+  return path.join(os.homedir(), ".mywiki", "config.json");
 }
 
 function isDirectory(p: string): boolean {
@@ -53,7 +53,7 @@ export function getConfig(): Config {
     };
   } catch {
     console.warn(
-      `[openlatex] Could not parse ${p}; using empty defaults. The file will be overwritten on the next save.`,
+      `[mywiki] Could not parse ${p}; using empty defaults. The file will be overwritten on the next save.`,
     );
     return { ...DEFAULT_CONFIG };
   }

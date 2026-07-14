@@ -137,9 +137,9 @@ describe("bibtexHasKey — the duplicate-key guard", () => {
 
 function setupProjectWithSource(source: AiSourceRecord, sourceText: string): string {
   const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), "openlatex-agent-"));
-  const sourcesDir = path.join(projectDir, ".openlatex", "ai", "sources");
+  const sourcesDir = path.join(projectDir, ".mywiki", "ai", "sources");
   fs.mkdirSync(sourcesDir, { recursive: true });
-  fs.mkdirSync(path.join(projectDir, ".openlatex", "ai", "index"), { recursive: true });
+  fs.mkdirSync(path.join(projectDir, ".mywiki", "ai", "index"), { recursive: true });
   fs.writeFileSync(path.join(sourcesDir, source.storedName), sourceText);
 
   const manifest: AiManifest = {
@@ -151,7 +151,7 @@ function setupProjectWithSource(source: AiSourceRecord, sourceText: string): str
     index: { chunkCount: 0, embeddingCount: 0, generatedAt: null },
   };
   fs.writeFileSync(
-    path.join(projectDir, ".openlatex", "ai", "manifest.json"),
+    path.join(projectDir, ".mywiki", "ai", "manifest.json"),
     JSON.stringify(manifest),
   );
   fs.writeFileSync(path.join(projectDir, "references.bib"), "");
@@ -164,7 +164,7 @@ describe("ensureBibtexEntry — PDF-metadata pre-fill", () => {
       id: "src-1",
       originalName: "clean.txt",
       storedName: "src-1.txt",
-      relativePath: ".openlatex/ai/sources/src-1.txt",
+      relativePath: ".mywiki/ai/sources/src-1.txt",
       kind: "text",
       bytes: 0,
       ingestedAt: "2026-01-01T00:00:00.000Z",
@@ -202,7 +202,7 @@ describe("ensureBibtexEntry — PDF-metadata pre-fill", () => {
       id: "src-2",
       originalName: "notes.txt",
       storedName: "src-2.txt",
-      relativePath: ".openlatex/ai/sources/src-2.txt",
+      relativePath: ".mywiki/ai/sources/src-2.txt",
       kind: "text",
       bytes: 0,
       ingestedAt: "2026-01-01T00:00:00.000Z",
@@ -240,7 +240,7 @@ describe("ensureBibtexEntry — PDF-metadata pre-fill", () => {
       id: "src-3",
       originalName: "blank-title.txt",
       storedName: "src-3.txt",
-      relativePath: ".openlatex/ai/sources/src-3.txt",
+      relativePath: ".mywiki/ai/sources/src-3.txt",
       kind: "text",
       bytes: 0,
       ingestedAt: "2026-01-01T00:00:00.000Z",
@@ -280,7 +280,7 @@ describe("ensureBibtexEntry — PDF-metadata pre-fill", () => {
       id: "note-1",
       originalName: "My synthesis of the literature",
       storedName: "note-1.md",
-      relativePath: ".openlatex/ai/sources/note-1.md",
+      relativePath: ".mywiki/ai/sources/note-1.md",
       kind: "note",
       bytes: 0,
       ingestedAt: "2026-01-01T00:00:00.000Z",
@@ -313,7 +313,7 @@ describe("ensureBibtexEntry — PDF-metadata pre-fill", () => {
       id: "src-4",
       originalName: "guessed-authors.txt",
       storedName: "src-4.txt",
-      relativePath: ".openlatex/ai/sources/src-4.txt",
+      relativePath: ".mywiki/ai/sources/src-4.txt",
       kind: "text",
       bytes: 0,
       ingestedAt: "2026-01-01T00:00:00.000Z",
@@ -356,7 +356,7 @@ describe("ensureBibtexEntry — PDF-metadata pre-fill", () => {
       id: "src-5",
       originalName: "verified.txt",
       storedName: "src-5.txt",
-      relativePath: ".openlatex/ai/sources/src-5.txt",
+      relativePath: ".mywiki/ai/sources/src-5.txt",
       kind: "text",
       bytes: 0,
       ingestedAt: "2026-01-01T00:00:00.000Z",
@@ -400,7 +400,7 @@ describe("ensureBibtexEntry — PDF-metadata pre-fill", () => {
       id: "src-6",
       originalName: "manually-fixed.txt",
       storedName: "src-6.txt",
-      relativePath: ".openlatex/ai/sources/src-6.txt",
+      relativePath: ".mywiki/ai/sources/src-6.txt",
       kind: "text",
       bytes: 0,
       ingestedAt: "2026-01-01T00:00:00.000Z",

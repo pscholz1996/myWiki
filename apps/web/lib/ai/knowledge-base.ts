@@ -46,9 +46,9 @@ export interface AiSearchHit {
   chunk: AiChunkRecord;
 }
 
-const AI_DIR = [".openlatex", "ai"] as const;
-const SOURCES_DIR = [".openlatex", "ai", "sources"] as const;
-const INDEX_DIR = [".openlatex", "ai", "index"] as const;
+const AI_DIR = [".mywiki", "ai"] as const;
+const SOURCES_DIR = [".mywiki", "ai", "sources"] as const;
+const INDEX_DIR = [".mywiki", "ai", "index"] as const;
 const MANIFEST_FILE = "manifest.json";
 const CHUNKS_FILE = "chunks.jsonl";
 const EMBEDDINGS_FILE = "embeddings.bin";
@@ -823,7 +823,7 @@ async function saveSourceFile(
   await fs.writeFile(absPath, Buffer.from(data));
   return {
     storedName,
-    relativePath: posixJoin(".openlatex", "ai", "sources", storedName),
+    relativePath: posixJoin(".mywiki", "ai", "sources", storedName),
   };
 }
 
@@ -842,7 +842,7 @@ async function extractAndChunkSource(
 }> {
   const sourcePath = path.join(
     projectDir,
-    ".openlatex",
+    ".mywiki",
     "ai",
     "sources",
     source.storedName,
@@ -1353,7 +1353,7 @@ export async function saveResearchNote(params: {
 
   const id = existing?.id ?? crypto.randomUUID();
   const storedName = `${id}.md`;
-  const relativePath = posixJoin(".openlatex", "ai", "sources", storedName);
+  const relativePath = posixJoin(".mywiki", "ai", "sources", storedName);
   const bytes = Buffer.from(content, "utf8");
   await fs.writeFile(path.join(sourcesDir, storedName), bytes);
 
@@ -1397,7 +1397,7 @@ export async function rebuildAiIndex(
   for (const source of sources) {
     const sourcePath = path.join(
       projectDir,
-      ".openlatex",
+      ".mywiki",
       "ai",
       "sources",
       source.storedName,
@@ -1607,7 +1607,7 @@ export function getAiSourceFilePath(
   projectDir: string,
   source: AiSourceRecord,
 ): string {
-  return path.join(projectDir, ".openlatex", "ai", "sources", source.storedName);
+  return path.join(projectDir, ".mywiki", "ai", "sources", source.storedName);
 }
 
 export async function readAiSourcePage(
@@ -1622,7 +1622,7 @@ export async function readAiSourcePage(
 
   const sourcePath = path.join(
     projectDir,
-    ".openlatex",
+    ".mywiki",
     "ai",
     "sources",
     source.storedName,
@@ -1653,7 +1653,7 @@ export async function readAiSourceFull(
 
   const sourcePath = path.join(
     projectDir,
-    ".openlatex",
+    ".mywiki",
     "ai",
     "sources",
     source.storedName,

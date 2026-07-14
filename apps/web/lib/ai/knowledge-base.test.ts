@@ -132,7 +132,7 @@ const SOURCE: AiSourceRecord = {
   id: "src-1",
   originalName: "paper.txt",
   storedName: "src-1.txt",
-  relativePath: ".openlatex/ai/sources/src-1.txt",
+  relativePath: ".mywiki/ai/sources/src-1.txt",
   kind: "text",
   bytes: 0,
   ingestedAt: "2026-01-01T00:00:00.000Z",
@@ -146,7 +146,7 @@ beforeEach(() => {
   lookupCrossrefMetadataMock.mockReset();
   lookupCrossrefMetadataMock.mockResolvedValue(undefined);
   projectDir = fs.mkdtempSync(path.join(os.tmpdir(), "openlatex-kb-"));
-  const sourcesDir = path.join(projectDir, ".openlatex", "ai", "sources");
+  const sourcesDir = path.join(projectDir, ".mywiki", "ai", "sources");
   fs.mkdirSync(sourcesDir, { recursive: true });
   fs.writeFileSync(path.join(sourcesDir, SOURCE.storedName), PAGE_TEXT);
 
@@ -159,7 +159,7 @@ beforeEach(() => {
     index: { chunkCount: 0, embeddingCount: 0, generatedAt: null },
   };
   fs.writeFileSync(
-    path.join(projectDir, ".openlatex", "ai", "manifest.json"),
+    path.join(projectDir, ".mywiki", "ai", "manifest.json"),
     JSON.stringify(manifest),
   );
 });

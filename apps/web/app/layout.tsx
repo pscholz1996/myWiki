@@ -16,8 +16,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "OpenLatex — Local LaTeX Editor",
-  description: "Filesystem-backed LaTeX editor with live preview.",
+  title: "myWiki — AI Knowledge Base",
+  description:
+    "Local, filesystem-backed knowledge wiki with an AI research assistant.",
 };
 
 export default function RootLayout({

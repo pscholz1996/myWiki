@@ -1,14 +1,14 @@
 {
-  "name": "@openlatex/web",
+  "name": "@mywiki/web",
   "version": "0.1.1",
   "private": true,
-  "description": "Local filesystem-backed LaTeX editor with live preview and Git integration",
-  "homepage": "https://github.com/xTazah/OpenLatex",
+  "description": "Local, AI-driven knowledge wiki with source viewer and Claude research assistant",
+  "homepage": "https://github.com/pscholz1996/myWiki",
   "repository": {
     "type": "git",
-    "url": "https://github.com/xTazah/OpenLatex"
+    "url": "https://github.com/pscholz1996/myWiki"
   },
-  "author": "xTazah",
+  "author": "Philipp Scholz",
   "license": "MIT",
   "scripts": {
     "dev": "next dev",
@@ -34,7 +34,6 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
-    "codemirror-lang-latex": "^0.2.0",
     "date-fns": "^4.1.0",
     "embla-carousel-react": "^8.6.0",
     "input-otp": "^1.4.2",

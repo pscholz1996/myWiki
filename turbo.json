@@ -6,12 +6,7 @@
       "dependsOn": ["^build"],
       "inputs": ["$TURBO_DEFAULT$", ".env*"],
       "outputs": [".next/**", "!.next/cache/**", ".wrangler/**", "dist/**"],
-      "env": [
-        "OPENAI_API_KEY",
-        "LATEX_API_URL",
-        "KV_REST_API_URL",
-        "KV_REST_API_TOKEN"
-      ]
+      "env": []
     },
     "dev": {
       "cache": false,

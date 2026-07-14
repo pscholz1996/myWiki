@@ -97,6 +97,6 @@ export async function closeWatcher(): Promise<void> {
   try {
     await w.close();
   } catch (error) {
-    console.warn("[openlatex] watcher.close() rejected:", error);
+    console.warn("[mywiki] watcher.close() rejected:", error);
   }
 }

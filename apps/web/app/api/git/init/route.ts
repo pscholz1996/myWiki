@@ -4,7 +4,7 @@ import { NoProjectSelectedError } from "@/lib/fs/project-dir";
 
 export const dynamic = "force-dynamic";
 
-// Opt-in only — git is never required to use OpenLatex. This is the one
+// Opt-in only — git is never required to use myWiki. This is the one
 // explicit action that turns a plain folder into a repo; nothing else in
 // the app calls `git init` implicitly (Publish to GitHub does, but only
 // after the user explicitly asks to publish).
