@@ -14,7 +14,10 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
-function conversationFilePath(projectDir: string, conversationId: string): string {
+function conversationFilePath(
+  projectDir: string,
+  conversationId: string,
+): string {
   return path.join(projectDir, ...CONVERSATIONS_DIR, `${conversationId}.json`);
 }
 
@@ -44,7 +47,11 @@ export async function writeAiConversation(
 ): Promise<void> {
   const dir = await ensureConversationDir(projectDir);
   const filePath = path.join(dir, `${conversation.id}.json`);
-  await fs.writeFile(filePath, `${JSON.stringify(conversation, null, 2)}\n`, "utf8");
+  await fs.writeFile(
+    filePath,
+    `${JSON.stringify(conversation, null, 2)}\n`,
+    "utf8",
+  );
 }
 
 export async function deleteAiConversation(
@@ -64,7 +71,9 @@ export async function listAiConversations(
   projectDir: string,
 ): Promise<AiConversationSummary[]> {
   const dir = await ensureConversationDir(projectDir);
-  const files = (await fs.readdir(dir)).filter((name) => name.endsWith(".json"));
+  const files = (await fs.readdir(dir)).filter((name) =>
+    name.endsWith(".json"),
+  );
 
   const summaries: AiConversationSummary[] = [];
   for (const file of files) {
@@ -79,7 +88,9 @@ export async function listAiConversations(
         id: conversation.id,
         title:
           conversation.title ??
-          conversation.messages.find((m) => m.role === "user")?.content.slice(0, 80),
+          conversation.messages
+            .find((m) => m.role === "user")
+            ?.content.slice(0, 80),
         updatedAt: conversation.updatedAt,
         messageCount: conversation.messages.length,
       });
@@ -113,7 +124,9 @@ export async function createAiConversation(params: {
 export async function updateAiConversation(
   projectDir: string,
   conversationId: string,
-  updater: (conversation: AiConversation) => AiConversation | Promise<AiConversation>,
+  updater: (
+    conversation: AiConversation,
+  ) => AiConversation | Promise<AiConversation>,
 ): Promise<AiConversation> {
   const current =
     (await readAiConversation(projectDir, conversationId)) ??
@@ -135,7 +148,10 @@ export function appendMessage(
   };
 }
 
-export function mergeUsage(left?: AiUsage, right?: AiUsage): AiUsage | undefined {
+export function mergeUsage(
+  left?: AiUsage,
+  right?: AiUsage,
+): AiUsage | undefined {
   if (!left) return right;
   if (!right) return left;
   return {

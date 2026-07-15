@@ -1,7 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronDownIcon, FileTextIcon, PencilIcon, Trash2Icon } from "lucide-react";
+import {
+  ChevronDownIcon,
+  FileTextIcon,
+  PencilIcon,
+  Trash2Icon,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -229,7 +234,10 @@ export function SourceListItem({
           {isEditing ? (
             <div className="space-y-2.5">
               <div className="space-y-1">
-                <Label htmlFor={`title-${source.id}`} className="text-muted-foreground">
+                <Label
+                  htmlFor={`title-${source.id}`}
+                  className="text-muted-foreground"
+                >
                   Title
                 </Label>
                 <Input
@@ -241,7 +249,10 @@ export function SourceListItem({
                 />
               </div>
               <div className="space-y-1">
-                <Label htmlFor={`authors-${source.id}`} className="text-muted-foreground">
+                <Label
+                  htmlFor={`authors-${source.id}`}
+                  className="text-muted-foreground"
+                >
                   Authors
                 </Label>
                 <Input
@@ -254,7 +265,10 @@ export function SourceListItem({
                 />
               </div>
               <div className="space-y-1">
-                <Label htmlFor={`year-${source.id}`} className="text-muted-foreground">
+                <Label
+                  htmlFor={`year-${source.id}`}
+                  className="text-muted-foreground"
+                >
                   Year
                 </Label>
                 <Input
@@ -265,7 +279,9 @@ export function SourceListItem({
                   disabled={saving}
                 />
               </div>
-              {saveError ? <p className="text-destructive">{saveError}</p> : null}
+              {saveError ? (
+                <p className="text-destructive">{saveError}</p>
+              ) : null}
               <div className="flex gap-1.5 pt-0.5">
                 <Button
                   size="sm"

@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { extractDoi, lookupCrossrefMetadata, titleSimilarity } from "./crossref";
+import {
+  extractDoi,
+  lookupCrossrefMetadata,
+  titleSimilarity,
+} from "./crossref";
 
 describe("extractDoi", () => {
   test("extracts from an Elsevier-style doi: title", () => {
@@ -27,15 +31,30 @@ describe("extractDoi", () => {
 
 describe("titleSimilarity", () => {
   test("is 1 for identical titles", () => {
-    expect(titleSimilarity("Model-Based Systems Engineering", "Model-Based Systems Engineering")).toBe(1);
+    expect(
+      titleSimilarity(
+        "Model-Based Systems Engineering",
+        "Model-Based Systems Engineering",
+      ),
+    ).toBe(1);
   });
 
   test("is insensitive to case and punctuation", () => {
-    expect(titleSimilarity("Model-Based Systems Engineering", "model based systems engineering!")).toBe(1);
+    expect(
+      titleSimilarity(
+        "Model-Based Systems Engineering",
+        "model based systems engineering!",
+      ),
+    ).toBe(1);
   });
 
   test("is 0 for completely unrelated titles", () => {
-    expect(titleSimilarity("Quantum Entanglement in Cold Atoms", "A Recipe for Sourdough Bread")).toBe(0);
+    expect(
+      titleSimilarity(
+        "Quantum Entanglement in Cold Atoms",
+        "A Recipe for Sourdough Bread",
+      ),
+    ).toBe(0);
   });
 
   test("is partial for titles that share some but not all words", () => {
@@ -89,7 +108,9 @@ describe("lookupCrossrefMetadata", () => {
       },
     ]);
 
-    const result = await lookupCrossrefMetadata("Model-Based Systems Engineering Uptake");
+    const result = await lookupCrossrefMetadata(
+      "Model-Based Systems Engineering Uptake",
+    );
     expect(result).toEqual({
       title: "Model-Based Systems Engineering Uptake",
       authors: ["James Cameron", "Jane Doe"],
@@ -108,7 +129,9 @@ describe("lookupCrossrefMetadata", () => {
       },
     ]);
 
-    const result = await lookupCrossrefMetadata("Model-Based Systems Engineering Uptake");
+    const result = await lookupCrossrefMetadata(
+      "Model-Based Systems Engineering Uptake",
+    );
     expect(result).toBeUndefined();
   });
 
@@ -123,7 +146,9 @@ describe("lookupCrossrefMetadata", () => {
       },
     ]);
 
-    const result = await lookupCrossrefMetadata("Model-Based Systems Engineering Uptake");
+    const result = await lookupCrossrefMetadata(
+      "Model-Based Systems Engineering Uptake",
+    );
     expect(result?.title).toBe("Model-Based Systems Engineering Uptake");
   });
 

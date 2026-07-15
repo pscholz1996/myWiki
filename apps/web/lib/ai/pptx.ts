@@ -43,7 +43,9 @@ export function extractSlideText(xml: string): string {
   return lines.join("\n");
 }
 
-export async function extractPptxSlides(data: Uint8Array): Promise<PptxSlide[]> {
+export async function extractPptxSlides(
+  data: Uint8Array,
+): Promise<PptxSlide[]> {
   const zip = await JSZip.loadAsync(data);
   const slideFiles = Object.keys(zip.files)
     .map((name) => {

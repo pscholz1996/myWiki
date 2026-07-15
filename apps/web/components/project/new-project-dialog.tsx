@@ -86,16 +86,14 @@ export function NewProjectDialog({ open, onClose }: Props) {
           <DialogHeader>
             <DialogTitle>New knowledge folder</DialogTitle>
             <DialogDescription>
-              Creates a new folder with a blank main.tex file, ready to write in.
+              Creates a new folder with a blank main.tex file, ready to write
+              in.
             </DialogDescription>
           </DialogHeader>
 
           <div className="min-w-0 space-y-4">
             <div className="space-y-1.5">
-              <label
-                htmlFor="new-project-name"
-                className="font-medium text-sm"
-              >
+              <label htmlFor="new-project-name" className="font-medium text-sm">
                 Folder name
               </label>
               <Input
@@ -131,11 +129,7 @@ export function NewProjectDialog({ open, onClose }: Props) {
           </div>
 
           <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={onClose}
-              disabled={submitting}
-            >
+            <Button variant="outline" onClick={onClose} disabled={submitting}>
               Cancel
             </Button>
             <Button onClick={() => void onCreate()} disabled={!canCreate}>

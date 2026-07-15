@@ -82,7 +82,7 @@ function AnswerActions({ message }: { message: AiMessage }) {
   };
 
   return (
-    <div className="mt-2 flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+    <div className="mt-2 flex items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
       <TooltipIconButton
         tooltip={copied ? "Copied" : "Copy as markdown"}
         onClick={() => void handleCopy()}
@@ -316,7 +316,9 @@ export function ChatApp({ current }: ChatAppProps) {
   const loadPlanUsage = useAiStore((state) => state.loadPlanUsage);
   const conversations = useAiStore((state) => state.conversations);
   const loadConversations = useAiStore((state) => state.loadConversations);
-  const startNewConversation = useAiStore((state) => state.startNewConversation);
+  const startNewConversation = useAiStore(
+    (state) => state.startNewConversation,
+  );
   const switchConversation = useAiStore((state) => state.switchConversation);
   const removeConversation = useAiStore((state) => state.removeConversation);
   const sendMessage = useAiStore((state) => state.sendMessage);
@@ -431,7 +433,9 @@ export function ChatApp({ current }: ChatAppProps) {
           >
             <SquarePenIcon className="size-4" />
           </TooltipIconButton>
-          <DropdownMenu onOpenChange={(open) => open && void loadConversations()}>
+          <DropdownMenu
+            onOpenChange={(open) => open && void loadConversations()}
+          >
             <DropdownMenuTrigger asChild>
               <Button
                 variant="ghost"
@@ -628,7 +632,9 @@ export function ChatApp({ current }: ChatAppProps) {
           setBrowseOpen(false);
           void switchWikiFolder(p).catch((error) =>
             toast.error(
-              error instanceof Error ? error.message : "Failed to switch folder",
+              error instanceof Error
+                ? error.message
+                : "Failed to switch folder",
             ),
           );
         }}

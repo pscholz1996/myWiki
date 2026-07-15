@@ -14,7 +14,7 @@ let tmpDir: string;
 let configPath: string;
 
 beforeEach(() => {
-  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "openlatex-config-"));
+  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "mywiki-config-"));
   configPath = path.join(tmpDir, "config.json");
   _setConfigPathForTesting(configPath);
   delete process.env.PROJECT_DIR;
@@ -87,7 +87,7 @@ describe("readCurrentProject", () => {
       configPath,
       JSON.stringify({ currentProject: tmpDir, recentProjects: [tmpDir] }),
     );
-    const other = fs.mkdtempSync(path.join(os.tmpdir(), "openlatex-other-"));
+    const other = fs.mkdtempSync(path.join(os.tmpdir(), "mywiki-other-"));
     try {
       process.env.PROJECT_DIR = other;
       expect(readCurrentProject()).toBe(tmpDir);

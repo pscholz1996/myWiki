@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { getProjectDir, NoProjectSelectedError } from "@/lib/fs/project-dir";
-import { deleteAiSource, updateAiSourceMetadata } from "@/lib/ai/knowledge-base";
+import {
+  deleteAiSource,
+  updateAiSourceMetadata,
+} from "@/lib/ai/knowledge-base";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";

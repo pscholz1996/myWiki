@@ -37,7 +37,10 @@ export async function POST(req: Request) {
     return NextResponse.json({ note });
   } catch (error) {
     if (error instanceof NoProjectSelectedError) {
-      return NextResponse.json({ error: "no-project-selected" }, { status: 409 });
+      return NextResponse.json(
+        { error: "no-project-selected" },
+        { status: 409 },
+      );
     }
     const message = error instanceof Error ? error.message : "Unknown error";
     return NextResponse.json({ error: message }, { status: 500 });

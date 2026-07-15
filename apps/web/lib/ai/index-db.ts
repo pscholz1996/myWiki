@@ -81,7 +81,9 @@ export function getIndexDimensions(db: Database.Database): number | null {
 }
 
 export function getIndexChunkCount(db: Database.Database): number {
-  const row = db.prepare("SELECT COUNT(*) AS n FROM chunks").get() as { n: number };
+  const row = db.prepare("SELECT COUNT(*) AS n FROM chunks").get() as {
+    n: number;
+  };
   return row.n;
 }
 
@@ -150,7 +152,9 @@ export function deleteChunksBySource(
 ): void {
   if (sourceIds.length === 0) return;
   const run = db.transaction((ids: string[]) => {
-    const selectRows = db.prepare("SELECT rowid FROM chunks WHERE source_id = ?");
+    const selectRows = db.prepare(
+      "SELECT rowid FROM chunks WHERE source_id = ?",
+    );
     const delFts = db.prepare("DELETE FROM chunks_fts WHERE rowid = ?");
     const delChunk = db.prepare("DELETE FROM chunks WHERE rowid = ?");
     const hasVec = getIndexDimensions(db) !== null;
@@ -158,7 +162,9 @@ export function deleteChunksBySource(
       ? db.prepare("DELETE FROM chunks_vec WHERE rowid = ?")
       : null;
     for (const sourceId of ids) {
-      const rows = selectRows.all(sourceId) as Array<{ rowid: number | bigint }>;
+      const rows = selectRows.all(sourceId) as Array<{
+        rowid: number | bigint;
+      }>;
       for (const { rowid } of rows) {
         delFts.run(rowid);
         delVec?.run(BigInt(rowid));
@@ -260,7 +266,9 @@ export function searchHybrid(
          JOIN chunks c ON c.rowid = v.rowid
          ORDER BY v.distance`,
       )
-      .all(embeddingBuffer(queryEmbedding), legLimit) as Array<ChunkRow & { d: number }>;
+      .all(embeddingBuffer(queryEmbedding), legLimit) as Array<
+      ChunkRow & { d: number }
+    >;
     for (const row of rows) {
       if (!allowed(row)) continue;
       byRowid.set(Number(row.rowid), row);

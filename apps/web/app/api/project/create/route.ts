@@ -17,7 +17,8 @@ export async function POST(req: Request) {
     return NextResponse.json(
       {
         error: "bad-request",
-        message: "Request body must be JSON with 'parentPath' and 'name' fields.",
+        message:
+          "Request body must be JSON with 'parentPath' and 'name' fields.",
       },
       { status: 400 },
     );
@@ -47,7 +48,8 @@ export async function POST(req: Request) {
     return NextResponse.json(
       {
         error: "invalid-name",
-        message: "Project name can't contain a path separator or be '.' / '..'.",
+        message:
+          "Project name can't contain a path separator or be '.' / '..'.",
       },
       { status: 400 },
     );
@@ -58,13 +60,21 @@ export async function POST(req: Request) {
     const parentStat = await fs.stat(resolvedParent);
     if (!parentStat.isDirectory()) {
       return NextResponse.json(
-        { error: "not-a-directory", message: "Location is not a directory.", path: resolvedParent },
+        {
+          error: "not-a-directory",
+          message: "Location is not a directory.",
+          path: resolvedParent,
+        },
         { status: 400 },
       );
     }
   } catch {
     return NextResponse.json(
-      { error: "path-not-found", message: "Location does not exist.", path: resolvedParent },
+      {
+        error: "path-not-found",
+        message: "Location does not exist.",
+        path: resolvedParent,
+      },
       { status: 400 },
     );
   }
@@ -89,7 +99,8 @@ export async function POST(req: Request) {
         return NextResponse.json(
           {
             error: "not-empty",
-            message: "A folder with that name already exists and isn't empty. Choose a different name.",
+            message:
+              "A folder with that name already exists and isn't empty. Choose a different name.",
             path: projectPath,
           },
           { status: 409 },
@@ -105,7 +116,10 @@ export async function POST(req: Request) {
     const code = /EACCES|EPERM|permission/i.test(message)
       ? "permission-denied"
       : "create-failed";
-    return NextResponse.json({ error: code, message, path: projectPath }, { status: 500 });
+    return NextResponse.json(
+      { error: code, message, path: projectPath },
+      { status: 500 },
+    );
   }
 
   await closeWatcher();

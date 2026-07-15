@@ -32,7 +32,9 @@ describe("findStaleCitedSourceIds — the deletion-safety gate", () => {
     const conv = conversation([
       assistantMessage([{ sourceId: "src-1", page: 2, quote: "q" }]),
     ]);
-    expect(findStaleCitedSourceIds(conv, new Set(["src-1", "src-2"]))).toEqual([]);
+    expect(findStaleCitedSourceIds(conv, new Set(["src-1", "src-2"]))).toEqual(
+      [],
+    );
   });
 
   test("flags a source that was cited but no longer exists", () => {
@@ -57,6 +59,8 @@ describe("findStaleCitedSourceIds — the deletion-safety gate", () => {
         { sourceId: "src-2", page: 1, quote: "b" },
       ]),
     ]);
-    expect(findStaleCitedSourceIds(conv, new Set(["src-2"]))).toEqual(["src-1"]);
+    expect(findStaleCitedSourceIds(conv, new Set(["src-2"]))).toEqual([
+      "src-1",
+    ]);
   });
 });

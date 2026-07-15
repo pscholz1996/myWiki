@@ -51,8 +51,15 @@ export function titleSimilarity(a: string, b: string): number {
   return union > 0 ? intersection / union : 0;
 }
 
-function extractCrossrefYear(item: Record<string, unknown>): string | undefined {
-  const dateFields = ["published", "published-print", "published-online", "issued"];
+function extractCrossrefYear(
+  item: Record<string, unknown>,
+): string | undefined {
+  const dateFields = [
+    "published",
+    "published-print",
+    "published-online",
+    "issued",
+  ];
   for (const field of dateFields) {
     const container = item[field] as { "date-parts"?: unknown } | undefined;
     const dateParts = container?.["date-parts"];
@@ -80,7 +87,7 @@ export async function lookupCrossrefMetadata(
         // CrossRef's "polite pool" gets faster/more reliable rate limits
         // for requests with a descriptive User-Agent; requests without one
         // still work, just via the lower-priority public pool.
-        "User-Agent": "OpenLatex/0.1 (+https://github.com/xTazah/OpenLatex)",
+        "User-Agent": "myWiki/0.1 (+https://github.com/pscholz1996/myWiki)",
       },
       signal: controller.signal,
     });
@@ -110,7 +117,9 @@ export async function lookupCrossrefMetadata(
   let bestSimilarity = 0;
   for (const rawItem of items) {
     const item = rawItem as Record<string, unknown>;
-    const candidateTitle = Array.isArray(item.title) ? item.title[0] : undefined;
+    const candidateTitle = Array.isArray(item.title)
+      ? item.title[0]
+      : undefined;
     if (typeof candidateTitle !== "string" || !candidateTitle.trim()) continue;
     const similarity = titleSimilarity(trimmedTitle, candidateTitle);
     if (similarity > bestSimilarity) {
@@ -127,7 +136,9 @@ export async function lookupCrossrefMetadata(
     .map((author) => {
       const a = author as { given?: unknown; family?: unknown };
       return [a.given, a.family]
-        .filter((part): part is string => typeof part === "string" && part.length > 0)
+        .filter(
+          (part): part is string => typeof part === "string" && part.length > 0,
+        )
         .join(" ")
         .trim();
     })
@@ -163,7 +174,7 @@ export async function lookupCrossrefByDoi(
   try {
     response = await fetch(url, {
       headers: {
-        "User-Agent": "OpenLatex/0.1 (+https://github.com/xTazah/OpenLatex)",
+        "User-Agent": "myWiki/0.1 (+https://github.com/pscholz1996/myWiki)",
       },
       signal: controller.signal,
     });
@@ -191,7 +202,9 @@ export async function lookupCrossrefByDoi(
     .map((author) => {
       const a = author as { given?: unknown; family?: unknown };
       return [a.given, a.family]
-        .filter((part): part is string => typeof part === "string" && part.length > 0)
+        .filter(
+          (part): part is string => typeof part === "string" && part.length > 0,
+        )
         .join(" ")
         .trim();
     })

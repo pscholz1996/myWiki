@@ -1,7 +1,10 @@
 import fs from "node:fs/promises";
 import { NextResponse } from "next/server";
 import { getProjectDir, NoProjectSelectedError } from "@/lib/fs/project-dir";
-import { getAiSourceFilePath, getAiSourceRecord } from "@/lib/ai/knowledge-base";
+import {
+  getAiSourceFilePath,
+  getAiSourceRecord,
+} from "@/lib/ai/knowledge-base";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -30,7 +33,8 @@ export async function GET(
 
     return new NextResponse(new Uint8Array(bytes), {
       headers: {
-        "Content-Type": CONTENT_TYPES[source.kind] ?? "application/octet-stream",
+        "Content-Type":
+          CONTENT_TYPES[source.kind] ?? "application/octet-stream",
         "Content-Disposition": `inline; filename="${source.originalName}"`,
       },
     });

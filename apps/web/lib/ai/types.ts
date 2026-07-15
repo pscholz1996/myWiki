@@ -212,8 +212,18 @@ export interface AiPlanUsage {
 // granularity checkpoint available).
 export type AiUploadProgressEvent =
   | { stage: "saving"; fileName: string; fileIndex: number; fileCount: number }
-  | { stage: "extracting"; fileName: string; fileIndex: number; fileCount: number }
-  | { stage: "verifying"; fileName: string; fileIndex: number; fileCount: number }
+  | {
+      stage: "extracting";
+      fileName: string;
+      fileIndex: number;
+      fileCount: number;
+    }
+  | {
+      stage: "verifying";
+      fileName: string;
+      fileIndex: number;
+      fileCount: number;
+    }
   | { stage: "embedding"; chunksDone: number; chunksTotal: number }
   | { stage: "indexing" };
 
@@ -228,7 +238,13 @@ export interface AiChatRequest {
 }
 
 export interface AiChatStreamEvent {
-  type: "assistant_chunk" | "assistant_done" | "usage" | "compacted" | "error" | "sdk";
+  type:
+    | "assistant_chunk"
+    | "assistant_done"
+    | "usage"
+    | "compacted"
+    | "error"
+    | "sdk";
   data?: unknown;
   message?: string;
 }
@@ -238,4 +254,3 @@ export interface AiCompactionNotice {
   preTokens?: number;
   postTokens?: number;
 }
-

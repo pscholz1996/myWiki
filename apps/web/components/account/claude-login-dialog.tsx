@@ -84,8 +84,7 @@ export function ClaudeLoginDialog({
         <DialogHeader>
           <DialogTitle>Sign in with Claude</DialogTitle>
           <DialogDescription>
-            Uses the Claude CLI's own sign-in — OpenLatex never sees your
-            password.
+            Uses the Claude CLI's own sign-in — myWiki never sees your password.
           </DialogDescription>
         </DialogHeader>
 

@@ -24,6 +24,23 @@ jobs:
 
       - run: pnpm lint
 
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm --filter @mywiki/web test
+
   build:
     name: Build
     runs-on: ubuntu-latest
@@ -39,6 +56,4 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - run: pnpm --filter @openlatex/web build
-
-      - run: pnpm --filter @openlatex/latex-api build
+      - run: pnpm --filter @mywiki/web build

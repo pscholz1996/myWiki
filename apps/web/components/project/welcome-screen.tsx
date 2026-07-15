@@ -60,8 +60,8 @@ export function WelcomeScreen({ recent }: WelcomeScreenProps) {
           <div className="space-y-1">
             <h1 className="font-semibold text-2xl">myWiki</h1>
             <p className="text-muted-foreground text-sm">
-              Choose the folder where your knowledge base lives (or should
-              live) — sources and index are stored there, chat happens here.
+              Choose the folder where your knowledge base lives (or should live)
+              — sources and index are stored there, chat happens here.
             </p>
           </div>
 

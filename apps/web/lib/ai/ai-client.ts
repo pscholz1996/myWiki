@@ -15,8 +15,12 @@ function errFrom(res: Response): Promise<Error> {
   return res
     .json()
     .then((data: { error?: string; rejected?: AiRejectedSourceFile[] }) => {
-      const reasons = data.rejected?.map((r) => `${r.name}: ${r.reason}`).join("; ");
-      const message = reasons ? `${data.error ?? "Upload failed"} (${reasons})` : data.error;
+      const reasons = data.rejected
+        ?.map((r) => `${r.name}: ${r.reason}`)
+        .join("; ");
+      const message = reasons
+        ? `${data.error ?? "Upload failed"} (${reasons})`
+        : data.error;
       return new Error(message ?? `HTTP ${res.status}`);
     })
     .catch(() => new Error(`HTTP ${res.status}`));
@@ -152,8 +156,12 @@ export async function updateAiSourceMetadata(
 export async function fetchAiConversation(
   conversationId?: string,
 ): Promise<AiConversation | null> {
-  const query = conversationId ? `?id=${encodeURIComponent(conversationId)}` : "";
-  const res = await fetch(`/api/ai/conversation${query}`, { cache: "no-store" });
+  const query = conversationId
+    ? `?id=${encodeURIComponent(conversationId)}`
+    : "";
+  const res = await fetch(`/api/ai/conversation${query}`, {
+    cache: "no-store",
+  });
   if (!res.ok) throw await errFrom(res);
   const data = (await res.json()) as { conversation: AiConversation | null };
   return data.conversation;
@@ -162,13 +170,17 @@ export async function fetchAiConversation(
 export async function deleteConversation(
   conversationId?: string,
 ): Promise<{ ok: boolean }> {
-  const query = conversationId ? `?id=${encodeURIComponent(conversationId)}` : "";
+  const query = conversationId
+    ? `?id=${encodeURIComponent(conversationId)}`
+    : "";
   const res = await fetch(`/api/ai/conversation${query}`, { method: "DELETE" });
   if (!res.ok) throw await errFrom(res);
   return res.json() as Promise<{ ok: boolean }>;
 }
 
-export async function fetchConversationList(): Promise<AiConversationSummary[]> {
+export async function fetchConversationList(): Promise<
+  AiConversationSummary[]
+> {
   const data = await getJson<{ conversations: AiConversationSummary[] }>(
     "/api/ai/conversations",
   );

@@ -247,9 +247,13 @@ export async function POST(req: Request) {
             usage,
             citations: citations.length > 0 ? citations : undefined,
           };
-          const nextConversation = appendMessage(conversation, assistantMessage);
+          const nextConversation = appendMessage(
+            conversation,
+            assistantMessage,
+          );
           nextConversation.usage = cumulativeUsage;
-          nextConversation.contextTokens = contextTokens ?? conversation.contextTokens;
+          nextConversation.contextTokens =
+            contextTokens ?? conversation.contextTokens;
           await updateAiConversation(
             projectDir,
             nextConversation.id,
@@ -277,7 +281,8 @@ export async function POST(req: Request) {
               }
               const assistantError = (sdkMessage as any).error;
               if (assistantError) {
-                turnErrorMessage = friendlySdkError(assistantError) ?? turnErrorMessage;
+                turnErrorMessage =
+                  friendlySdkError(assistantError) ?? turnErrorMessage;
               }
             }
 
@@ -285,7 +290,8 @@ export async function POST(req: Request) {
               usage = extractUsage(sdkMessage);
               if (usage) {
                 cumulativeUsage = mergeUsage(conversation.usage, usage);
-                contextTokens = (usage.cacheReadTokens ?? 0) + usage.inputTokens;
+                contextTokens =
+                  (usage.cacheReadTokens ?? 0) + usage.inputTokens;
                 push("usage", { usage: cumulativeUsage, contextTokens });
               }
               if ((sdkMessage as any).is_error) {
@@ -317,7 +323,10 @@ export async function POST(req: Request) {
             // persisted session already summarized what it dropped — but
             // the user should know it happened rather than just noticing
             // the model "forgot" something from many turns ago.
-            if (kind === "system" && (sdkMessage as any)?.subtype === "compact_boundary") {
+            if (
+              kind === "system" &&
+              (sdkMessage as any)?.subtype === "compact_boundary"
+            ) {
               const metadata = (sdkMessage as any).compact_metadata ?? {};
               push("compacted", {
                 trigger: metadata.trigger,

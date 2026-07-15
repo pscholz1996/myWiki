@@ -52,7 +52,8 @@ vi.mock("./crossref", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./crossref")>();
   return {
     ...actual,
-    lookupCrossrefMetadata: (title: string) => lookupCrossrefMetadataMock(title),
+    lookupCrossrefMetadata: (title: string) =>
+      lookupCrossrefMetadataMock(title),
   };
 });
 
@@ -60,7 +61,6 @@ import {
   chunkText,
   readAiSourcePage,
   verifyAiCitation,
-  ensureAiWorkspace,
   uploadAiSources,
   rebuildAiIndex,
   searchAiKnowledgeBase,
@@ -111,8 +111,7 @@ function buildPdfWithMetadata(params: {
     )
     .join("\n");
   objects[5] = `<< /Length ${content.length} >>\nstream\n${content}\nendstream`;
-  objects[6] =
-    `<< /Title (${params.title}) /Author (${params.author}) /CreationDate (${params.creationDate}) >>`;
+  objects[6] = `<< /Title (${params.title}) /Author (${params.author}) /CreationDate (${params.creationDate}) >>`;
 
   let pdf = "%PDF-1.4\n";
   const offsets: number[] = [0];
@@ -146,7 +145,7 @@ const PAGE_TEXT =
 beforeEach(() => {
   lookupCrossrefMetadataMock.mockReset();
   lookupCrossrefMetadataMock.mockResolvedValue(undefined);
-  projectDir = fs.mkdtempSync(path.join(os.tmpdir(), "openlatex-kb-"));
+  projectDir = fs.mkdtempSync(path.join(os.tmpdir(), "mywiki-kb-"));
   const sourcesDir = path.join(projectDir, ".mywiki", "ai", "sources");
   fs.mkdirSync(sourcesDir, { recursive: true });
   fs.writeFileSync(path.join(sourcesDir, SOURCE.storedName), PAGE_TEXT);
@@ -272,14 +271,19 @@ describe("saveResearchNote", () => {
     const note = await saveResearchNote({
       projectDir,
       title: "Findings on quantum entanglement",
-      content: "Quantum entanglement links particles across distance regardless of separation.",
+      content:
+        "Quantum entanglement links particles across distance regardless of separation.",
       drawsOnSourceIds: [SOURCE.id],
     });
     expect(note.kind).toBe("note");
     expect(note.originalName).toBe("Findings on quantum entanglement");
     expect(note.drawsOnSourceIds).toEqual([SOURCE.id]);
 
-    const hits = await searchAiKnowledgeBase(projectDir, "quantum entanglement particles", 5);
+    const hits = await searchAiKnowledgeBase(
+      projectDir,
+      "quantum entanglement particles",
+      5,
+    );
     expect(hits.some((h) => h.chunk.sourceId === note.id)).toBe(true);
   });
 
@@ -293,7 +297,8 @@ describe("saveResearchNote", () => {
     const updated = await saveResearchNote({
       projectDir,
       title: "Draft note",
-      content: "Revised content about high-temperature superconductors specifically.",
+      content:
+        "Revised content about high-temperature superconductors specifically.",
       noteId: created.id,
     });
     expect(updated.id).toBe(created.id);
@@ -303,7 +308,11 @@ describe("saveResearchNote", () => {
     const noteSources = manifest.sources.filter((s) => s.id === created.id);
     expect(noteSources).toHaveLength(1);
 
-    const hits = await searchAiKnowledgeBase(projectDir, "high-temperature superconductors", 5);
+    const hits = await searchAiKnowledgeBase(
+      projectDir,
+      "high-temperature superconductors",
+      5,
+    );
     const noteHit = hits.find((h) => h.chunk.sourceId === created.id);
     expect(noteHit?.chunk.text).toContain("Revised content");
   });
@@ -361,47 +370,89 @@ function textFile(name: string, content: string): File {
 describe("searchAiKnowledgeBase — scoring and cache freshness", () => {
   test("ranks hits by descending score and doesn't return stale results after a new upload", async () => {
     await uploadAiSources(projectDir, [
-      textFile("quantum.txt", "Quantum entanglement links particles across distance."),
+      textFile(
+        "quantum.txt",
+        "Quantum entanglement links particles across distance.",
+      ),
     ]);
 
-    const firstHits = await searchAiKnowledgeBase(projectDir, "quantum entanglement", 5);
+    const firstHits = await searchAiKnowledgeBase(
+      projectDir,
+      "quantum entanglement",
+      5,
+    );
     expect(firstHits.length).toBeGreaterThan(0);
     for (let i = 1; i < firstHits.length; i += 1) {
       expect(firstHits[i].score).toBeLessThanOrEqual(firstHits[i - 1].score);
     }
-    expect(firstHits.some((hit) => hit.chunk.text.includes("Sourdough"))).toBe(false);
+    expect(firstHits.some((hit) => hit.chunk.text.includes("Sourdough"))).toBe(
+      false,
+    );
 
     // A second call, after a new upload, must reflect the new source — not
     // whatever getKbIndex happened to cache on the first call.
     await uploadAiSources(projectDir, [
-      textFile("bread.txt", "Sourdough baking relies on wild yeast fermentation."),
+      textFile(
+        "bread.txt",
+        "Sourdough baking relies on wild yeast fermentation.",
+      ),
     ]);
-    const secondHits = await searchAiKnowledgeBase(projectDir, "sourdough fermentation", 5);
-    expect(secondHits.some((hit) => hit.chunk.text.includes("Sourdough"))).toBe(true);
+    const secondHits = await searchAiKnowledgeBase(
+      projectDir,
+      "sourdough fermentation",
+      5,
+    );
+    expect(secondHits.some((hit) => hit.chunk.text.includes("Sourdough"))).toBe(
+      true,
+    );
   });
 });
 
 describe("appendSourcesToIndex — incremental writes", () => {
   test("two incremental uploads search identically to a full rebuild", async () => {
     await uploadAiSources(projectDir, [
-      textFile("alpha.txt", "Alpha paper about quantum entanglement and nonlocal correlations."),
+      textFile(
+        "alpha.txt",
+        "Alpha paper about quantum entanglement and nonlocal correlations.",
+      ),
     ]);
     await uploadAiSources(projectDir, [
-      textFile("beta.txt", "Beta paper about neural network pruning techniques."),
+      textFile(
+        "beta.txt",
+        "Beta paper about neural network pruning techniques.",
+      ),
     ]);
 
-    const incrementalAlpha = await searchAiKnowledgeBase(projectDir, "quantum entanglement", 3);
-    const incrementalBeta = await searchAiKnowledgeBase(projectDir, "neural network pruning", 3);
+    const incrementalAlpha = await searchAiKnowledgeBase(
+      projectDir,
+      "quantum entanglement",
+      3,
+    );
+    const incrementalBeta = await searchAiKnowledgeBase(
+      projectDir,
+      "neural network pruning",
+      3,
+    );
 
     // Rebuild from scratch using only the two sources actually appended above
     // (the shared fixture's SOURCE was registered in the manifest but never
     // indexed, so it must stay excluded here to keep the comparison apples-to-apples).
     const manifest = await listAiSources(projectDir);
-    const uploaded = manifest.sources.filter((source) => source.id !== SOURCE.id);
+    const uploaded = manifest.sources.filter(
+      (source) => source.id !== SOURCE.id,
+    );
     await rebuildAiIndex(projectDir, uploaded);
 
-    const rebuiltAlpha = await searchAiKnowledgeBase(projectDir, "quantum entanglement", 3);
-    const rebuiltBeta = await searchAiKnowledgeBase(projectDir, "neural network pruning", 3);
+    const rebuiltAlpha = await searchAiKnowledgeBase(
+      projectDir,
+      "quantum entanglement",
+      3,
+    );
+    const rebuiltBeta = await searchAiKnowledgeBase(
+      projectDir,
+      "neural network pruning",
+      3,
+    );
 
     expect(rebuiltAlpha.map((h) => h.chunk.id)).toEqual(
       incrementalAlpha.map((h) => h.chunk.id),
@@ -423,9 +474,17 @@ describe("appendSourcesToIndex — incremental writes", () => {
 
     await deleteAiSource(projectDir, alpha!.id);
 
-    const hits = await searchAiKnowledgeBase(projectDir, "quantum entanglement", 5);
+    const hits = await searchAiKnowledgeBase(
+      projectDir,
+      "quantum entanglement",
+      5,
+    );
     expect(hits.every((h) => h.chunk.sourceId !== alpha!.id)).toBe(true);
-    const betaHits = await searchAiKnowledgeBase(projectDir, "neural network pruning", 5);
+    const betaHits = await searchAiKnowledgeBase(
+      projectDir,
+      "neural network pruning",
+      5,
+    );
     expect(betaHits.length).toBeGreaterThan(0);
   });
 });
@@ -447,14 +506,16 @@ describe("isJunkPdfTitle", () => {
   });
 
   test("rejects common PDF-export placeholder titles", () => {
-    expect(isJunkPdfTitle("untitled", "cameron2020_mbse_uptake.pdf")).toBe(true);
+    expect(isJunkPdfTitle("untitled", "cameron2020_mbse_uptake.pdf")).toBe(
+      true,
+    );
     expect(isJunkPdfTitle("Untitled Document", "paper.pdf")).toBe(true);
   });
 
   test("accepts a real title", () => {
-    expect(isJunkPdfTitle("Model Based Systems Engineering: A Survey", "paper.pdf")).toBe(
-      false,
-    );
+    expect(
+      isJunkPdfTitle("Model Based Systems Engineering: A Survey", "paper.pdf"),
+    ).toBe(false);
   });
 });
 
@@ -471,7 +532,9 @@ describe("extractYearFromPdfDate", () => {
 
   test("rejects an out-of-range year (placeholder/malformed dates)", () => {
     expect(extractYearFromPdfDate("D:00000000000000")).toBeUndefined();
-    expect(extractYearFromPdfDate(`D:${new Date().getFullYear() + 50}0101000000`)).toBeUndefined();
+    expect(
+      extractYearFromPdfDate(`D:${new Date().getFullYear() + 50}0101000000`),
+    ).toBeUndefined();
   });
 });
 
@@ -482,7 +545,9 @@ describe("heuristicTitleFromText", () => {
   });
 
   test("returns short text as-is", () => {
-    expect(heuristicTitleFromText("A Short Paper Title")).toBe("A Short Paper Title");
+    expect(heuristicTitleFromText("A Short Paper Title")).toBe(
+      "A Short Paper Title",
+    );
   });
 
   test("truncates long text to ~150 characters with an ellipsis", () => {
@@ -509,9 +574,14 @@ describe("heuristicTitleFromText", () => {
 describe("upload metadata provenance", () => {
   test("a plain-text source gets heuristic title-only metadata, never authors", async () => {
     const { manifest } = await uploadAiSources(projectDir, [
-      textFile("notes.txt", "Notes on quantum entanglement and nonlocal correlations between particles."),
+      textFile(
+        "notes.txt",
+        "Notes on quantum entanglement and nonlocal correlations between particles.",
+      ),
     ]);
-    const uploaded = manifest.sources.find((s) => s.originalName === "notes.txt");
+    const uploaded = manifest.sources.find(
+      (s) => s.originalName === "notes.txt",
+    );
     expect(uploaded?.metadata?.provenance).toBe("heuristic");
     expect(uploaded?.metadata?.title).toBeTruthy();
     expect(uploaded?.metadata?.authors).toBeUndefined();
@@ -543,7 +613,9 @@ describe("upload metadata provenance", () => {
     expect(uploaded?.metadata?.year).toBe("2023");
     expect(uploaded?.metadata?.authors).toEqual(["Ada Lovelace"]);
     expect(uploaded?.metadata?.titleIsHeuristic).toBe(true);
-    expect(uploaded?.metadata?.title).toContain("Findings on quantum entanglement");
+    expect(uploaded?.metadata?.title).toContain(
+      "Findings on quantum entanglement",
+    );
   });
 
   // Real papers/books put the title in a visibly larger font than the
@@ -610,7 +682,11 @@ describe("upload metadata provenance", () => {
         { text: "T", fontSize: 30, y: 720 },
         { text: "A Real Paper Title", fontSize: 24, y: 690 },
         { text: "Jane Doe", fontSize: 10, y: 660 },
-        { text: "HE rest of the drop-capped word continues here.", fontSize: 10, y: 630 },
+        {
+          text: "HE rest of the drop-capped word continues here.",
+          fontSize: 10,
+          y: 630,
+        },
       ],
     });
     const file = new File([new Uint8Array(pdfBytes)], "drop-cap.pdf", {
@@ -711,7 +787,11 @@ describe("page-1 layout — author extraction", () => {
       creationDate: "D:20240101120000+00'00'",
       textRuns: [
         { text: "A Paper With No Detectable Byline", fontSize: 24, y: 700 },
-        { text: "Abstract: this paper studies systems engineering.", fontSize: 10, y: 670 },
+        {
+          text: "Abstract: this paper studies systems engineering.",
+          fontSize: 10,
+          y: 670,
+        },
       ],
     });
     const file = new File([new Uint8Array(pdfBytes)], "no-byline.pdf", {
@@ -781,7 +861,10 @@ describe("CrossRef enrichment at upload time", () => {
 
   test("never calls CrossRef for a non-PDF upload", async () => {
     await uploadAiSources(projectDir, [
-      textFile("notes.txt", "Notes on quantum entanglement and nonlocal correlations."),
+      textFile(
+        "notes.txt",
+        "Notes on quantum entanglement and nonlocal correlations.",
+      ),
     ]);
     expect(lookupCrossrefMetadataMock).not.toHaveBeenCalled();
   });
@@ -790,7 +873,8 @@ describe("CrossRef enrichment at upload time", () => {
     await saveResearchNote({
       projectDir,
       title: "My synthesis of the literature",
-      content: "This is my own synthesized understanding, not a primary source.",
+      content:
+        "This is my own synthesized understanding, not a primary source.",
     });
     expect(lookupCrossrefMetadataMock).not.toHaveBeenCalled();
   });
@@ -814,9 +898,9 @@ describe("updateAiSourceMetadata — the manual-edit gate", () => {
     });
 
     const manifest = await listAiSources(projectDir);
-    expect(manifest.sources.find((s) => s.id === SOURCE.id)?.metadata?.title).toBe(
-      "The Real Title",
-    );
+    expect(
+      manifest.sources.find((s) => s.id === SOURCE.id)?.metadata?.title,
+    ).toBe("The Real Title");
   });
 
   // A human correcting the title shouldn't need to leave the year field
@@ -860,7 +944,9 @@ describe("updateAiSourceMetadata — the manual-edit gate", () => {
       type: "application/pdf",
     });
     const { manifest: uploaded } = await uploadAiSources(projectDir, [file]);
-    const source = uploaded.sources.find((s) => s.originalName === "guessed.pdf")!;
+    const source = uploaded.sources.find(
+      (s) => s.originalName === "guessed.pdf",
+    )!;
     expect(source.metadata?.titleIsHeuristic).toBe(true);
 
     const corrected = await updateAiSourceMetadata(projectDir, source.id, {
@@ -903,8 +989,14 @@ describe("deleteAiSources — bulk delete", () => {
     expect(result.index.chunkCount).toBe(0);
     expect(result.index.embeddingCount).toBe(0);
 
-    const hits = await searchAiKnowledgeBase(projectDir, "quantum entanglement", 5);
-    expect(hits.every((hit) => hit.chunk.sourceId !== uploaded[0].id)).toBe(true);
+    const hits = await searchAiKnowledgeBase(
+      projectDir,
+      "quantum entanglement",
+      5,
+    );
+    expect(hits.every((hit) => hit.chunk.sourceId !== uploaded[0].id)).toBe(
+      true,
+    );
   });
 
   test("throws when none of the given ids exist", async () => {
@@ -923,10 +1015,12 @@ describe("uploadAiSources — duplicate detection", () => {
       textFile("first-copy.txt", content),
     ]);
     expect(rejected).toHaveLength(1);
-    expect(rejected[0].reason).toContain("Identical to an already-uploaded source");
-    expect(manifest.sources.some((s) => s.originalName === "first-copy.txt")).toBe(
-      false,
+    expect(rejected[0].reason).toContain(
+      "Identical to an already-uploaded source",
     );
+    expect(
+      manifest.sources.some((s) => s.originalName === "first-copy.txt"),
+    ).toBe(false);
   });
 
   test("rejects two byte-identical files uploaded in the same batch", async () => {
@@ -972,9 +1066,9 @@ describe("uploadAiSources — duplicate detection", () => {
       "A Study of Model-Based Systems Engineering Adoption",
     );
     // A warning is informational, not a rejection — the file is still indexed.
-    expect(manifest.sources.some((s) => s.originalName === "resubmission.pdf")).toBe(
-      true,
-    );
+    expect(
+      manifest.sources.some((s) => s.originalName === "resubmission.pdf"),
+    ).toBe(true);
   });
 
   test("does not warn when titles are genuinely different", async () => {

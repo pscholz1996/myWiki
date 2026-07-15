@@ -59,9 +59,10 @@ interface AiState {
   loadSources: () => Promise<void>;
   loadConversation: () => Promise<void>;
   loadPlanUsage: () => Promise<void>;
-  uploadSources: (
-    files: File[],
-  ) => Promise<{ rejected: AiRejectedSourceFile[]; warnings: AiUploadWarning[] }>;
+  uploadSources: (files: File[]) => Promise<{
+    rejected: AiRejectedSourceFile[];
+    warnings: AiUploadWarning[];
+  }>;
   removeSource: (sourceId: string) => Promise<void>;
   editSourceMetadata: (
     sourceId: string,
@@ -92,7 +93,10 @@ function makeAssistantMessage(content = ""): AiMessage {
   return { id: newId(), role: "assistant", content, createdAt: nowIso() };
 }
 
-function upsertAssistantChunk(conversation: AiConversation, chunk: string): AiConversation {
+function upsertAssistantChunk(
+  conversation: AiConversation,
+  chunk: string,
+): AiConversation {
   const messages = [...conversation.messages];
   const last = messages[messages.length - 1];
 
@@ -173,7 +177,9 @@ export const useAiStore = create<AiState>((set, get) => ({
       if (token !== sourcesOpSeq) return;
       set({
         error:
-          error instanceof Error ? error.message : "Failed to load knowledge base",
+          error instanceof Error
+            ? error.message
+            : "Failed to load knowledge base",
       });
     } finally {
       if (token === sourcesOpSeq) set({ loading: false });
@@ -183,7 +189,9 @@ export const useAiStore = create<AiState>((set, get) => ({
   async loadConversation() {
     set({ loading: true, error: null });
     try {
-      const conversation = await fetchAiConversation(readActiveConversationId());
+      const conversation = await fetchAiConversation(
+        readActiveConversationId(),
+      );
       set({
         activeConversation: conversation,
         currentSourceIds: conversation?.sourceIds ?? [],
@@ -191,7 +199,9 @@ export const useAiStore = create<AiState>((set, get) => ({
     } catch (error) {
       set({
         error:
-          error instanceof Error ? error.message : "Failed to load conversation",
+          error instanceof Error
+            ? error.message
+            : "Failed to load conversation",
       });
     } finally {
       set({ loading: false });
@@ -231,7 +241,8 @@ export const useAiStore = create<AiState>((set, get) => ({
       });
       throw error;
     } finally {
-      if (token === sourcesOpSeq) set({ actionLoading: false, uploadProgress: null });
+      if (token === sourcesOpSeq)
+        set({ actionLoading: false, uploadProgress: null });
     }
   },
 
@@ -247,7 +258,9 @@ export const useAiStore = create<AiState>((set, get) => ({
         // Drop the deleted source from any active selection so the "N
         // selected" count and the search scope don't silently reference a
         // source that no longer exists.
-        currentSourceIds: state.currentSourceIds.filter((id) => id !== sourceId),
+        currentSourceIds: state.currentSourceIds.filter(
+          (id) => id !== sourceId,
+        ),
         activeConversation: state.activeConversation
           ? {
               ...state.activeConversation,
@@ -281,7 +294,9 @@ export const useAiStore = create<AiState>((set, get) => ({
         );
         return {
           sources,
-          manifest: state.manifest ? { ...state.manifest, sources } : state.manifest,
+          manifest: state.manifest
+            ? { ...state.manifest, sources }
+            : state.manifest,
         };
       });
     } catch (error) {
@@ -324,7 +339,9 @@ export const useAiStore = create<AiState>((set, get) => ({
     } catch (error) {
       set({
         error:
-          error instanceof Error ? error.message : "Failed to start conversation",
+          error instanceof Error
+            ? error.message
+            : "Failed to start conversation",
       });
       throw error;
     } finally {
@@ -346,7 +363,9 @@ export const useAiStore = create<AiState>((set, get) => ({
     } catch (error) {
       set({
         error:
-          error instanceof Error ? error.message : "Failed to open conversation",
+          error instanceof Error
+            ? error.message
+            : "Failed to open conversation",
       });
       throw error;
     } finally {
@@ -367,7 +386,9 @@ export const useAiStore = create<AiState>((set, get) => ({
     } catch (error) {
       set({
         error:
-          error instanceof Error ? error.message : "Failed to delete conversation",
+          error instanceof Error
+            ? error.message
+            : "Failed to delete conversation",
       });
       throw error;
     } finally {
@@ -436,7 +457,11 @@ export const useAiStore = create<AiState>((set, get) => ({
 
     try {
       await streamAiChat(request, (event: AiChatStreamEvent) => {
-        if (event.type === "assistant_chunk" && event.data && typeof event.data === "object") {
+        if (
+          event.type === "assistant_chunk" &&
+          event.data &&
+          typeof event.data === "object"
+        ) {
           const data = event.data as { text?: string };
           const text = data.text;
           if (!text) return;
@@ -449,7 +474,11 @@ export const useAiStore = create<AiState>((set, get) => ({
           return;
         }
 
-        if (event.type === "usage" && event.data && typeof event.data === "object") {
+        if (
+          event.type === "usage" &&
+          event.data &&
+          typeof event.data === "object"
+        ) {
           const data = event.data as {
             usage?: AiConversation["usage"];
             contextTokens?: number;
@@ -466,12 +495,20 @@ export const useAiStore = create<AiState>((set, get) => ({
           return;
         }
 
-        if (event.type === "compacted" && event.data && typeof event.data === "object") {
+        if (
+          event.type === "compacted" &&
+          event.data &&
+          typeof event.data === "object"
+        ) {
           set({ compactionNotice: event.data as AiCompactionNotice });
           return;
         }
 
-        if (event.type === "assistant_done" && event.data && typeof event.data === "object") {
+        if (
+          event.type === "assistant_done" &&
+          event.data &&
+          typeof event.data === "object"
+        ) {
           const data = event.data as {
             content?: string;
             usage?: AiConversation["usage"];
@@ -518,7 +555,8 @@ export const useAiStore = create<AiState>((set, get) => ({
 
   toggleSourceSelection(sourceId: string) {
     set((state) => {
-      const base = state.activeConversation?.sourceIds ?? state.currentSourceIds;
+      const base =
+        state.activeConversation?.sourceIds ?? state.currentSourceIds;
       const nextSourceIds = base.includes(sourceId)
         ? base.filter((id) => id !== sourceId)
         : [...base, sourceId];

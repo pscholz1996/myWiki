@@ -58,7 +58,11 @@ function attributionFor(
 ): string {
   const title = source.metadata?.title ?? source.originalName;
   const locator =
-    page == null ? "" : source.kind === "pptx" ? `, slide ${page}` : `, p. ${page}`;
+    page == null
+      ? ""
+      : source.kind === "pptx"
+        ? `, slide ${page}`
+        : `, p. ${page}`;
   return `${title}${locator}${suffix ? ` (${suffix})` : ""}`;
 }
 
@@ -104,7 +108,9 @@ export async function readImagePng(
 ): Promise<Buffer | null> {
   if (!IMAGE_ID_PATTERN.test(imageId)) return null;
   try {
-    return await fs.readFile(path.join(imagesDir(projectDir), `${imageId}.png`));
+    return await fs.readFile(
+      path.join(imagesDir(projectDir), `${imageId}.png`),
+    );
   } catch {
     return null;
   }
@@ -195,7 +201,10 @@ export async function renderPdfPage(
     MAX_RENDER_DIMENSION / Math.max(base.width, base.height),
   );
   const viewport = pdfPage.getViewport({ scale });
-  const canvas = createCanvas(Math.ceil(viewport.width), Math.ceil(viewport.height));
+  const canvas = createCanvas(
+    Math.ceil(viewport.width),
+    Math.ceil(viewport.height),
+  );
   const ctx = canvas.getContext("2d");
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -266,13 +275,17 @@ export async function extractPptxMediaImage(
     await fs.readFile(getAiSourceFilePath(projectDir, source)),
   );
   const entry = zip.files[`ppt/media/${mediaName}`];
-  if (!entry) throw new Error(`Media "${mediaName}" not found in ${source.originalName}`);
+  if (!entry)
+    throw new Error(`Media "${mediaName}" not found in ${source.originalName}`);
 
   const bytes = await entry.async("nodebuffer");
   // Normalize every format to PNG via canvas so downstream crop/annotate and
   // the serving route only ever deal with one format.
   const img = await loadImage(bytes);
-  const scale = Math.min(1, MAX_RENDER_DIMENSION / Math.max(img.width, img.height));
+  const scale = Math.min(
+    1,
+    MAX_RENDER_DIMENSION / Math.max(img.width, img.height),
+  );
   const canvas = createCanvas(
     Math.max(1, Math.round(img.width * scale)),
     Math.max(1, Math.round(img.height * scale)),
@@ -334,9 +347,30 @@ export async function cropRegisteredImage(
 
 export type AiAnnotation =
   | { type: "circle"; x: number; y: number; radius: number; color?: string }
-  | { type: "rect"; x: number; y: number; width: number; height: number; color?: string }
-  | { type: "highlight"; x: number; y: number; width: number; height: number; color?: string }
-  | { type: "arrow"; fromX: number; fromY: number; toX: number; toY: number; color?: string }
+  | {
+      type: "rect";
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+      color?: string;
+    }
+  | {
+      type: "highlight";
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+      color?: string;
+    }
+  | {
+      type: "arrow";
+      fromX: number;
+      fromY: number;
+      toX: number;
+      toY: number;
+      color?: string;
+    }
   | { type: "label"; x: number; y: number; text: string; color?: string };
 
 const ANNOTATION_COLORS: Record<string, string> = {
@@ -375,7 +409,8 @@ export async function annotateRegisteredImage(
   const W = img.width;
   const H = img.height;
   const stroke = Math.max(2, Math.round(Math.max(W, H) * 0.004));
-  const colorOf = (c?: string) => ANNOTATION_COLORS[c ?? "red"] ?? ANNOTATION_COLORS.red;
+  const colorOf = (c?: string) =>
+    ANNOTATION_COLORS[c ?? "red"] ?? ANNOTATION_COLORS.red;
 
   for (const a of annotations) {
     ctx.lineWidth = stroke;
@@ -384,7 +419,15 @@ export async function annotateRegisteredImage(
     switch (a.type) {
       case "circle": {
         ctx.beginPath();
-        ctx.ellipse(a.x * W, a.y * H, a.radius * W, a.radius * W, 0, 0, Math.PI * 2);
+        ctx.ellipse(
+          a.x * W,
+          a.y * H,
+          a.radius * W,
+          a.radius * W,
+          0,
+          0,
+          Math.PI * 2,
+        );
         ctx.stroke();
         break;
       }
@@ -413,9 +456,15 @@ export async function annotateRegisteredImage(
         const head = stroke * 4;
         ctx.beginPath();
         ctx.moveTo(tx, ty);
-        ctx.lineTo(tx - head * Math.cos(angle - 0.5), ty - head * Math.sin(angle - 0.5));
+        ctx.lineTo(
+          tx - head * Math.cos(angle - 0.5),
+          ty - head * Math.sin(angle - 0.5),
+        );
         ctx.moveTo(tx, ty);
-        ctx.lineTo(tx - head * Math.cos(angle + 0.5), ty - head * Math.sin(angle + 0.5));
+        ctx.lineTo(
+          tx - head * Math.cos(angle + 0.5),
+          ty - head * Math.sin(angle + 0.5),
+        );
         ctx.stroke();
         break;
       }
@@ -432,7 +481,12 @@ export async function annotateRegisteredImage(
         ctx.save();
         ctx.globalAlpha = 0.85;
         ctx.fillStyle = "#ffffff";
-        ctx.fillRect(bx - pad, by - fontSize - pad, metrics.width + pad * 2, fontSize + pad * 2);
+        ctx.fillRect(
+          bx - pad,
+          by - fontSize - pad,
+          metrics.width + pad * 2,
+          fontSize + pad * 2,
+        );
         ctx.restore();
         ctx.fillStyle = colorOf(a.color);
         ctx.fillText(text, bx, by);

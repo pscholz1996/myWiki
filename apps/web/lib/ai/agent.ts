@@ -80,7 +80,10 @@ async function serializePrompt(
 ): Promise<string> {
   const manifest = await listAiSources(projectDir);
   const currentSourceIds = new Set(manifest.sources.map((source) => source.id));
-  const staleSourceIds = findStaleCitedSourceIds(conversation, currentSourceIds);
+  const staleSourceIds = findStaleCitedSourceIds(
+    conversation,
+    currentSourceIds,
+  );
 
   const lines = [
     "You are myWiki — a personal knowledge assistant answering questions from the user's own library (systems engineering, AI research, standards/norms, books, papers, slides) plus your general knowledge.",
@@ -89,9 +92,9 @@ async function serializePrompt(
     "## Answering",
     "- Your job is knowledge, not writing: give the clearest, most correct answer to the question. You have no file-editing tools and never draft documents.",
     "- Answer in the language of the question: a German question gets a German answer, an English question an English one. Keep source terminology as-is (e.g. a norm's defined German/English terms) where translating would change meaning.",
-    "- Everything you write outside tool calls is shown to the user as one continuous answer — so never narrate your process (\"searching now…\", \"found it, looks good, next I'll…\"). Work silently between tool calls and write only the polished answer itself.",
+    '- Everything you write outside tool calls is shown to the user as one continuous answer — so never narrate your process ("searching now…", "found it, looks good, next I\'ll…"). Work silently between tool calls and write only the polished answer itself.',
     "- Ground answers in the knowledge base first. For a substantive question, don't stop at the first useful chunk: search from multiple angles/phrasings — different terms, synonyms, related sub-questions, German and English where relevant — then synthesize one holistic answer across every relevant source.",
-    "- Where the sources don't cover something (or the question goes beyond them), answer from your general knowledge — but make the boundary visible. Mark those parts briefly, e.g. a short parenthetical \"(general knowledge — not in your sources)\" or a one-line note; never blur what came from the library vs. from you.",
+    '- Where the sources don\'t cover something (or the question goes beyond them), answer from your general knowledge — but make the boundary visible. Mark those parts briefly, e.g. a short parenthetical "(general knowledge — not in your sources)" or a one-line note; never blur what came from the library vs. from you.',
     "- If neither the sources nor your general knowledge support a confident answer, say so plainly.",
     "",
     "## Visual answers",
@@ -103,9 +106,9 @@ async function serializePrompt(
     "",
     "## Source images (original figures from the library)",
     "- When a source contains the actual figure for what's being asked (the V-model diagram in a handbook, an architecture figure in a paper, a chart on a slide), showing THAT original beats redrawing it. Workflow: find the page/slide via search or read_source_page, then for PDFs call view_page_image and crop_image to cut out just the figure; for pptx sources call list_slide_images + view_image. Embed the result with markdown: ![short description](its url).",
-    "- Do this proactively, not only when asked for an image: whenever your search results suggest a source has a figure that would genuinely help the explanation (search hits mentioning \"Figure/Abbildung/Bild/Diagramm/Tabelle X\", figure captions, slides that are clearly diagram slides), consider pulling it in on your own initiative. A question about a concept that a source illustrates deserves the source's illustration. Skip it when a figure adds nothing — proactive, not decorative.",
+    '- Do this proactively, not only when asked for an image: whenever your search results suggest a source has a figure that would genuinely help the explanation (search hits mentioning "Figure/Abbildung/Bild/Diagramm/Tabelle X", figure captions, slides that are clearly diagram slides), consider pulling it in on your own initiative. A question about a concept that a source illustrates deserves the source\'s illustration. Skip it when a figure adds nothing — proactive, not decorative.',
     "- Every image you embed MUST be followed on the next line by an italic attribution, e.g. *Source: INCOSE Handbook, p. 34* — the tool result gives you the exact attribution string to use. Never show a source image without saying where it's from.",
-    "- You may annotate a source image when a mark genuinely helps the explanation (circle the relevant block, arrow to the step being discussed, highlight a region) via annotate_image. Annotations are strictly additive pointers: never cover, redact, or alter the figure's own content, labels, or terminology, never more marks than the point needs, and the attribution already says \"(annotated)\" — keep it. Prefer shapes over text labels; a label is for short pointers only (\"here\", \"Step 2\").",
+    '- You may annotate a source image when a mark genuinely helps the explanation (circle the relevant block, arrow to the step being discussed, highlight a region) via annotate_image. Annotations are strictly additive pointers: never cover, redact, or alter the figure\'s own content, labels, or terminology, never more marks than the point needs, and the attribution already says "(annotated)" — keep it. Prefer shapes over text labels; a label is for short pointers only ("here", "Step 2").',
     "- Look at what each image tool returns (you see the image) and check it before embedding: is the crop clean, is the annotation on the right spot? Redo it if not — never embed an image you haven't visually checked.",
     "- If no source contains a suitable figure, say so if the user asked for one, and fall back to a mermaid diagram (marked as your own rendering, not from a source).",
     "",
@@ -114,7 +117,7 @@ async function serializePrompt(
     "- For pivotal or surprising source-backed claims, verify the exact quote with cite() so the answer carries a verified source chip the user can open. Routine background claims don't each need their own cite() call.",
     "- If a quote cannot be verified, say so and keep searching instead of guessing.",
     "- A citation made earlier in THIS conversation is not automatically still valid (sources can be deleted mid-conversation) — re-verify with cite() before restating it as verified. Re-verification is something you silently DO, never something you narrate.",
-    "- Search results and browse_knowledge_base may include research notes you saved in earlier turns (kind \"note\") alongside primary sources. A note is your own prior synthesis — useful context, never a primary source; cite() refuses to verify against it. When a broad multi-source search produces a genuinely new synthesis worth keeping, save it with save_research_note so future turns don't redo the work.",
+    '- Search results and browse_knowledge_base may include research notes you saved in earlier turns (kind "note") alongside primary sources. A note is your own prior synthesis — useful context, never a primary source; cite() refuses to verify against it. When a broad multi-source search produces a genuinely new synthesis worth keeping, save it with save_research_note so future turns don\'t redo the work.',
     "- If a source's stored title/authors looks wrong against the page text, point it out and ask before changing anything; only call update_source_metadata after the user explicitly confirms the correction.",
     staleSourceIds.length > 0
       ? `- The following source IDs were cited earlier in this conversation but have since been permanently REMOVED from the knowledge base: ${staleSourceIds.join(", ")}. Do not restate, confirm, or rely on anything from them. If asked, say the source was removed from the knowledge base and that information can no longer be verified.`
@@ -182,7 +185,9 @@ export function createMyWikiMcpServer(
             const entries = manifest.sources
               .filter((source) => !scoped || scoped.has(source.id))
               .filter((source) => !args.kind || source.kind === args.kind)
-              .filter((source) => !args.source_id || source.id === args.source_id)
+              .filter(
+                (source) => !args.source_id || source.id === args.source_id,
+              )
               .map((source) => ({
                 id: source.id,
                 kind: source.kind,
@@ -286,7 +291,7 @@ export function createMyWikiMcpServer(
       ),
       tool(
         "update_source_metadata",
-        "Correct a knowledge-base source's own stored title/authors/year (what browse_knowledge_base and the source list show). Only call this once the user has explicitly confirmed the correction in this conversation (e.g. \"yes, fix it, the real title is X\"); noticing a likely mismatch yourself is a reason to point it out and ask, never to silently overwrite. Pass the full corrected title, authors, and year together, even for a field that isn't changing — this replaces all three at once rather than patching one field, and sets the source's provenance to \"manual\", the same trust tier as a human editing it directly.",
+        'Correct a knowledge-base source\'s own stored title/authors/year (what browse_knowledge_base and the source list show). Only call this once the user has explicitly confirmed the correction in this conversation (e.g. "yes, fix it, the real title is X"); noticing a likely mismatch yourself is a reason to point it out and ask, never to silently overwrite. Pass the full corrected title, authors, and year together, even for a field that isn\'t changing — this replaces all three at once rather than patching one field, and sets the source\'s provenance to "manual", the same trust tier as a human editing it directly.',
         {
           source_id: z.string(),
           title: z.string().min(1),
@@ -308,11 +313,15 @@ export function createMyWikiMcpServer(
               );
             }
 
-            const updated = await updateAiSourceMetadata(projectDir, args.source_id, {
-              title: args.title,
-              authors: args.authors,
-              year: args.year,
-            });
+            const updated = await updateAiSourceMetadata(
+              projectDir,
+              args.source_id,
+              {
+                title: args.title,
+                authors: args.authors,
+                year: args.year,
+              },
+            );
 
             // Best-effort sanity check, not a
             // hard gate, since the whole point here is that some other
@@ -320,7 +329,11 @@ export function createMyWikiMcpServer(
             // wrong and page 1 is the actual ground truth.
             let titleVerified: boolean | null = null;
             try {
-              const { text } = await readAiSourcePage(projectDir, args.source_id, 1);
+              const { text } = await readAiSourcePage(
+                projectDir,
+                args.source_id,
+                1,
+              );
               titleVerified = normalizeWhitespace(text)
                 .toLowerCase()
                 .includes(normalizeWhitespace(args.title).toLowerCase());
@@ -396,7 +409,11 @@ export function createMyWikiMcpServer(
         },
         async (args) => {
           try {
-            const record = await renderPdfPage(projectDir, args.source_id, args.page);
+            const record = await renderPdfPage(
+              projectDir,
+              args.source_id,
+              args.page,
+            );
             return await imageToolResult(projectDir, record);
           } catch (error) {
             return callResult(
@@ -430,7 +447,9 @@ export function createMyWikiMcpServer(
             });
           } catch (error) {
             return callResult(
-              error instanceof Error ? error.message : "Failed to list slide images",
+              error instanceof Error
+                ? error.message
+                : "Failed to list slide images",
               true,
             );
           }
@@ -449,7 +468,8 @@ export function createMyWikiMcpServer(
           try {
             if (args.image_id) {
               const record = await getImageRecord(projectDir, args.image_id);
-              if (!record) return callResult({ error: "Image not found" }, true);
+              if (!record)
+                return callResult({ error: "Image not found" }, true);
               return await imageToolResult(projectDir, record);
             }
             if (args.source_id && args.slide && args.media_name) {
@@ -485,12 +505,16 @@ export function createMyWikiMcpServer(
         },
         async (args) => {
           try {
-            const record = await cropRegisteredImage(projectDir, args.image_id, {
-              x: args.x,
-              y: args.y,
-              width: args.width,
-              height: args.height,
-            });
+            const record = await cropRegisteredImage(
+              projectDir,
+              args.image_id,
+              {
+                x: args.x,
+                y: args.y,
+                width: args.width,
+                height: args.height,
+              },
+            );
             return await imageToolResult(projectDir, record);
           } catch (error) {
             return callResult(
@@ -502,7 +526,7 @@ export function createMyWikiMcpServer(
       ),
       tool(
         "annotate_image",
-        "Draw explanation marks on top of a registered image: circle, rect, arrow, highlight, or a short label. Strictly additive pointers — never cover or alter the figure's own content or terminology. Coordinates are normalized 0-1 (circle radius relative to image width). Produces a NEW image whose attribution ends in \"(annotated)\"; the original stays untouched. Returns the annotated image so you can check mark placement before embedding.",
+        'Draw explanation marks on top of a registered image: circle, rect, arrow, highlight, or a short label. Strictly additive pointers — never cover or alter the figure\'s own content or terminology. Coordinates are normalized 0-1 (circle radius relative to image width). Produces a NEW image whose attribution ends in "(annotated)"; the original stays untouched. Returns the annotated image so you can check mark placement before embedding.',
         {
           image_id: z.string(),
           annotations: z
@@ -535,7 +559,9 @@ export function createMyWikiMcpServer(
             return await imageToolResult(projectDir, record);
           } catch (error) {
             return callResult(
-              error instanceof Error ? error.message : "Failed to annotate image",
+              error instanceof Error
+                ? error.message
+                : "Failed to annotate image",
               true,
             );
           }
@@ -616,7 +642,10 @@ class PushableQueue<T> implements AsyncIterable<T> {
     return {
       next: (): Promise<IteratorResult<T>> => {
         if (this.buffered.length > 0) {
-          return Promise.resolve({ value: this.buffered.shift() as T, done: false });
+          return Promise.resolve({
+            value: this.buffered.shift() as T,
+            done: false,
+          });
         }
         if (this.closed) {
           return Promise.resolve({ value: undefined as never, done: true });
@@ -664,9 +693,11 @@ class TurnMessageStream {
         continue;
       }
       if (this.finished) return;
-      const result = await new Promise<IteratorResult<SDKMessage>>((resolve) => {
-        this.waiter = resolve;
-      });
+      const result = await new Promise<IteratorResult<SDKMessage>>(
+        (resolve) => {
+          this.waiter = resolve;
+        },
+      );
       if (result.done) return;
       yield result.value;
     }
@@ -803,7 +834,11 @@ export function closeLiveSession(
 ): void {
   const prefix = `${projectDir}::`;
   for (const [key, session] of liveSessions) {
-    if (conversationId ? key === sessionKey(projectDir, conversationId) : key.startsWith(prefix)) {
+    if (
+      conversationId
+        ? key === sessionKey(projectDir, conversationId)
+        : key.startsWith(prefix)
+    ) {
       session.close();
       liveSessions.delete(key);
     }

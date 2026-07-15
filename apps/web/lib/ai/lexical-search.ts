@@ -15,10 +15,46 @@
 // well into embedding space.
 
 const STOPWORDS = new Set([
-  "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "has",
-  "he", "in", "is", "it", "its", "of", "on", "that", "the", "to", "was",
-  "were", "will", "with", "this", "these", "those", "but", "or", "not",
-  "can", "which", "their", "have", "had", "been", "we", "our", "you",
+  "a",
+  "an",
+  "and",
+  "are",
+  "as",
+  "at",
+  "be",
+  "by",
+  "for",
+  "from",
+  "has",
+  "he",
+  "in",
+  "is",
+  "it",
+  "its",
+  "of",
+  "on",
+  "that",
+  "the",
+  "to",
+  "was",
+  "were",
+  "will",
+  "with",
+  "this",
+  "these",
+  "those",
+  "but",
+  "or",
+  "not",
+  "can",
+  "which",
+  "their",
+  "have",
+  "had",
+  "been",
+  "we",
+  "our",
+  "you",
 ]);
 
 export function tokenize(text: string): string[] {
@@ -73,7 +109,10 @@ const BM25_K1 = 1.2;
 const BM25_B = 0.75;
 
 /** Okapi BM25. Returns a score per doc id that matched at least one query term — docs with a zero score are omitted, not included with 0. */
-export function scoreBm25(index: Bm25Index, queryTokens: string[]): Map<string, number> {
+export function scoreBm25(
+  index: Bm25Index,
+  queryTokens: string[],
+): Map<string, number> {
   const scores = new Map<string, number>();
   if (index.documentCount === 0 || queryTokens.length === 0) return scores;
 
@@ -93,7 +132,8 @@ export function scoreBm25(index: Bm25Index, queryTokens: string[]): Map<string, 
 
     for (const [docId, termFreq] of docMap) {
       const length = index.docLength.get(docId) ?? 0;
-      const lengthNorm = 1 - BM25_B + BM25_B * (length / (index.avgDocLength || 1));
+      const lengthNorm =
+        1 - BM25_B + BM25_B * (length / (index.avgDocLength || 1));
       const termScore =
         (termFreq * (BM25_K1 + 1)) / (termFreq + BM25_K1 * lengthNorm);
       scores.set(docId, (scores.get(docId) ?? 0) + idf * termScore);

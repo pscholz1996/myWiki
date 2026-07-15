@@ -1,11 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
-import {
-  FolderPlusIcon,
-  Loader2Icon,
-  SearchIcon,
-} from "lucide-react";
+import { FolderPlusIcon, Loader2Icon, SearchIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -24,19 +20,17 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useAiStore } from "@/stores/ai-store";
-import type {
-  AiSourceRecord,
-  AiUploadProgressEvent,
-} from "@/lib/ai/types";
+import type { AiSourceRecord, AiUploadProgressEvent } from "@/lib/ai/types";
 import { SourceListItem, sourceNeedsReview } from "./source-list-item";
 
 // Embedding is the dominant, least predictable cost for a large source, so
 // it gets the bulk of the bar (20-95%) with real per-batch granularity;
 // saving/extracting/verifying and the final index write are comparatively
 // fast and only ever have coarse (per-file, or no) granularity to report.
-function describeUploadProgress(
-  event: AiUploadProgressEvent,
-): { label: string; percent: number } {
+function describeUploadProgress(event: AiUploadProgressEvent): {
+  label: string;
+  percent: number;
+} {
   switch (event.stage) {
     case "saving":
       return {
@@ -58,7 +52,8 @@ function describeUploadProgress(
         label: `Embedding chunks (${event.chunksDone}/${event.chunksTotal})…`,
         percent:
           20 +
-          (event.chunksTotal > 0 ? event.chunksDone / event.chunksTotal : 1) * 75,
+          (event.chunksTotal > 0 ? event.chunksDone / event.chunksTotal : 1) *
+            75,
       };
     case "indexing":
       return { label: "Writing index…", percent: 98 };
@@ -112,7 +107,6 @@ function sortSources(
         Number(s.metadata?.year) || -Infinity;
       return copy.sort((a, b) => yearOf(b) - yearOf(a));
     }
-    case "recent":
     default:
       return copy.sort((a, b) => b.ingestedAt.localeCompare(a.ingestedAt));
   }
@@ -274,7 +268,7 @@ export function SourcesDialog({ open, onOpenChange }: SourcesDialogProps) {
           <>
             <div className="flex items-center gap-1.5">
               <div className="relative flex-1">
-                <SearchIcon className="-translate-y-1/2 absolute top-1/2 left-2 size-3.5 text-muted-foreground" />
+                <SearchIcon className="absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   value={sourceQuery}
                   onChange={(event) => setSourceQuery(event.target.value)}

@@ -290,9 +290,12 @@ export function chunkText(
  * markers (plain text, pdfjs fallback, notes) degrade to exactly the old
  * behavior — one section spanning the page.
  */
-export function chunkPageSections(
-  pageText: string,
-): Array<{ heading?: string; charStart: number; charEnd: number; text: string }> {
+export function chunkPageSections(pageText: string): Array<{
+  heading?: string;
+  charStart: number;
+  charEnd: number;
+  text: string;
+}> {
   const lines = pageText.split("\n");
   const sections: Array<{ heading?: string; text: string }> = [];
   let currentHeading: string | undefined;
@@ -348,8 +351,9 @@ export function buildSourceDigest(
   const firstPage = pages[0]?.text ?? "";
   const withoutMarkers = firstPage.replace(/^##\s+/gm, "");
   const abstractSource =
-    withoutMarkers.match(/(?:abstract|zusammenfassung)\s*[:.\n]?\s*([\s\S]+)/i)?.[1] ??
-    withoutMarkers;
+    withoutMarkers.match(
+      /(?:abstract|zusammenfassung)\s*[:.\n]?\s*([\s\S]+)/i,
+    )?.[1] ?? withoutMarkers;
   const abstract = normalizeWhitespace(abstractSource).slice(
     0,
     DIGEST_ABSTRACT_MAX_CHARS,
@@ -375,7 +379,11 @@ export function buildSourceDigest(
 // PDF-export placeholder titles — confirmed against a real sample of ~20
 // academic PDFs, where "untitled" (unmodified word-processor/export
 // default) showed up as a Title value verbatim.
-const JUNK_TITLE_VALUES = new Set(["untitled", "untitled document", "untitled-1"]);
+const JUNK_TITLE_VALUES = new Set([
+  "untitled",
+  "untitled document",
+  "untitled-1",
+]);
 
 // A PDF's Title metadata field is frequently either blank, a literal
 // "Untitled" left over from whatever tool exported it, or just the filename
@@ -590,7 +598,9 @@ function selectByline(
 ): string[] | undefined {
   const titleYs = new Set(title.ys);
   const candidates = lines
-    .filter((line) => !titleYs.has(line.y) && line.fontSize < title.fontSize - 0.5)
+    .filter(
+      (line) => !titleYs.has(line.y) && line.fontSize < title.fontSize - 0.5,
+    )
     .map((line) => ({
       line,
       distance: Math.min(...title.ys.map((y) => Math.abs(y - line.y))),
@@ -609,9 +619,10 @@ function selectByline(
   return undefined;
 }
 
-function analyzePageOneLayout(
-  items: PdfTextItem[],
-): { title: string | undefined; authors: string[] | undefined } {
+function analyzePageOneLayout(items: PdfTextItem[]): {
+  title: string | undefined;
+  authors: string[] | undefined;
+} {
   const lines = buildPageLines(items);
   const titleLines = selectTitleLines(lines);
   if (!titleLines) return { title: undefined, authors: undefined };
@@ -632,9 +643,12 @@ async function extractPdfMetadata(
     const { info } = await document.getMetadata();
 
     const rawTitle = typeof info?.Title === "string" ? info.Title : "";
-    const title = isJunkPdfTitle(rawTitle, fileName) ? undefined : rawTitle.trim();
+    const title = isJunkPdfTitle(rawTitle, fileName)
+      ? undefined
+      : rawTitle.trim();
 
-    const rawAuthor = typeof info?.Author === "string" ? info.Author.trim() : "";
+    const rawAuthor =
+      typeof info?.Author === "string" ? info.Author.trim() : "";
     const authors = rawAuthor
       ? rawAuthor
           .split(/;|\band\b/i)
@@ -696,7 +710,9 @@ async function extractSourceText(
   const ext = path.extname(fileName).toLowerCase();
 
   if (ext === ".pptx") {
-    const { extractPptxSlides, extractPptxTitle } = await import("@/lib/ai/pptx");
+    const { extractPptxSlides, extractPptxTitle } = await import(
+      "@/lib/ai/pptx"
+    );
     const slides = await extractPptxSlides(data);
     const coreTitle = await extractPptxTitle(data);
     // First slide's first line is usually the deck title — same trust tier
@@ -718,10 +734,8 @@ async function extractSourceText(
   }
 
   if (ext === ".pdf") {
-    const { pages, metadata, layoutTitle, layoutAuthors } = await extractPdfPages(
-      data,
-      fileName,
-    );
+    const { pages, metadata, layoutTitle, layoutAuthors } =
+      await extractPdfPages(data, fileName);
     const fallbackTitle = () =>
       layoutTitle ?? heuristicTitleFromText(pages[0]?.text ?? "");
 
@@ -800,9 +814,12 @@ async function enrichMetadataWithCrossref(
   // Publisher PDFs (notably Elsevier) sometimes put the DOI in the Title
   // field. A DOI resolves to exactly one CrossRef record — no similarity
   // threshold needed — so it wins over fuzzy title search when present.
-  const doi = extractDoi(metadata.title) ?? (metadata.doi ? extractDoi(metadata.doi) : undefined);
+  const doi =
+    extractDoi(metadata.title) ??
+    (metadata.doi ? extractDoi(metadata.doi) : undefined);
   const crossref = doi
-    ? ((await lookupCrossrefByDoi(doi)) ?? (await lookupCrossrefMetadata(metadata.title)))
+    ? ((await lookupCrossrefByDoi(doi)) ??
+      (await lookupCrossrefMetadata(metadata.title)))
     : await lookupCrossrefMetadata(metadata.title);
   if (!crossref) return metadata;
 
@@ -866,12 +883,20 @@ interface ExtractionCacheEntry {
  * contentHash (their content changes in place), so they fall back to id,
  * which also makes note-update invalidation work.
  */
-function extractionCacheKey(source: Pick<AiSourceRecord, "id" | "contentHash">): string {
+function extractionCacheKey(
+  source: Pick<AiSourceRecord, "id" | "contentHash">,
+): string {
   return source.contentHash ?? source.id;
 }
 
 function extractionCachePath(projectDir: string, cacheKey: string): string {
-  return path.join(projectDir, ".mywiki", "ai", "extracted", `${cacheKey}.json`);
+  return path.join(
+    projectDir,
+    ".mywiki",
+    "ai",
+    "extracted",
+    `${cacheKey}.json`,
+  );
 }
 
 async function readExtractionCache(
@@ -879,7 +904,10 @@ async function readExtractionCache(
   cacheKey: string,
 ): Promise<ExtractionCacheEntry | null> {
   try {
-    const raw = await fs.readFile(extractionCachePath(projectDir, cacheKey), "utf8");
+    const raw = await fs.readFile(
+      extractionCachePath(projectDir, cacheKey),
+      "utf8",
+    );
     const parsed = JSON.parse(raw) as ExtractionCacheEntry;
     return Array.isArray(parsed.pages) ? parsed : null;
   } catch {
@@ -917,7 +945,10 @@ async function getExtractedPages(
   projectDir: string,
   source: AiSourceRecord,
 ): Promise<ExtractionCacheEntry> {
-  const cached = await readExtractionCache(projectDir, extractionCacheKey(source));
+  const cached = await readExtractionCache(
+    projectDir,
+    extractionCacheKey(source),
+  );
   if (cached) return cached;
 
   const sourcePath = path.join(
@@ -1013,7 +1044,9 @@ async function extractAndChunkSource(
       // What gets EMBEDDED carries the breadcrumb ("heading — text") so a
       // section's context disambiguates its chunks; what gets STORED is the
       // verbatim text, keeping quotes verifiable.
-      texts.push(chunk.heading ? `${chunk.heading} — ${chunk.text}` : chunk.text);
+      texts.push(
+        chunk.heading ? `${chunk.heading} — ${chunk.text}` : chunk.text,
+      );
     }
   }
 
@@ -1025,7 +1058,6 @@ async function extractAndChunkSource(
     digest: buildSourceDigest(pages),
   };
 }
-
 
 /**
  * Appends chunks/embeddings for newly-added sources to the existing index
@@ -1111,7 +1143,10 @@ async function appendSourcesToIndex(
       metadataById.set(source.id, enriched);
 
       if (enriched.title) {
-        const similar = findNearDuplicateTitle(enriched.title, manifest.sources);
+        const similar = findNearDuplicateTitle(
+          enriched.title,
+          manifest.sources,
+        );
         if (similar) {
           warnings.push({
             name: source.originalName,
@@ -1236,7 +1271,8 @@ export async function uploadAiSources(
   const existingManifest = await readManifest(projectDir);
   const knownHashes = new Map<string, string>();
   for (const source of existingManifest.sources) {
-    if (source.contentHash) knownHashes.set(source.contentHash, source.originalName);
+    if (source.contentHash)
+      knownHashes.set(source.contentHash, source.originalName);
   }
 
   const newSources: AiSourceRecord[] = [];
@@ -1491,7 +1527,10 @@ export async function rebuildAiIndex(
   clearIndexDb(db);
   insertChunks(
     db,
-    chunkRecords.map((record, index) => ({ record, embedding: vectors[index] })),
+    chunkRecords.map((record, index) => ({
+      record,
+      embedding: vectors[index],
+    })),
   );
 
   return {
@@ -1663,7 +1702,9 @@ export async function readAiSourceFull(
   return {
     source,
     text: extracted.pages
-      .map((entry) => (entry.page ? `[page ${entry.page}] ${entry.text}` : entry.text))
+      .map((entry) =>
+        entry.page ? `[page ${entry.page}] ${entry.text}` : entry.text,
+      )
       .join("\n\n"),
     pageCount: extracted.pageCount,
   };

@@ -12,7 +12,10 @@ function slideXml(paragraphs: string[][]): string {
   return `<?xml version="1.0"?><p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><p:txBody>${body}</p:txBody></p:sld>`;
 }
 
-async function buildPptx(slides: string[][][], title?: string): Promise<Uint8Array> {
+async function buildPptx(
+  slides: string[][][],
+  title?: string,
+): Promise<Uint8Array> {
   const zip = new JSZip();
   slides.forEach((paragraphs, index) => {
     zip.file(`ppt/slides/slide${index + 1}.xml`, slideXml(paragraphs));
