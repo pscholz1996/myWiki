@@ -20,6 +20,12 @@ export interface AiMessage {
   createdAt: string;
   usage?: AiUsage;
   citations?: AiCitation[];
+  /**
+   * Why this turn failed (rate limit, SDK error, …), persisted on the
+   * message so the failure stays visible in the transcript — a toast
+   * alone disappears, leaving an inexplicably blank answer behind.
+   */
+  error?: string;
 }
 
 export interface AiSource {

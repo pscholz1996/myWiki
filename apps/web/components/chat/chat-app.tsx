@@ -17,6 +17,7 @@ import {
   SquarePenIcon,
   SunIcon,
   Trash2Icon,
+  TriangleAlertIcon,
 } from "lucide-react";
 import { SiClaude } from "@icons-pack/react-simple-icons";
 import { useTheme } from "next-themes";
@@ -572,6 +573,12 @@ export function ChatApp({ current }: ChatAppProps) {
                   <div key={message.id} className="group max-w-full">
                     {message.content ? (
                       <AiMarkdown content={message.content} />
+                    ) : null}
+                    {message.error ? (
+                      <div className="mt-2 flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-destructive text-sm">
+                        <TriangleAlertIcon className="mt-0.5 size-4 shrink-0" />
+                        <span>{message.error}</span>
+                      </div>
                     ) : null}
                     {message.citations && message.citations.length > 0 ? (
                       <div className="mt-3 flex flex-wrap gap-1.5">

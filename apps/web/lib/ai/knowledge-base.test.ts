@@ -512,6 +512,11 @@ describe("isJunkPdfTitle", () => {
     expect(isJunkPdfTitle("Untitled Document", "paper.pdf")).toBe(true);
   });
 
+  test("rejects PowerPoint export placeholder titles (seen on real lecture slides)", () => {
+    expect(isJunkPdfTitle("PowerPoint-Präsentation", "5_Systems_Engineering_SS2025.pdf")).toBe(true);
+    expect(isJunkPdfTitle("PowerPoint Presentation", "slides.pdf")).toBe(true);
+  });
+
   test("accepts a real title", () => {
     expect(
       isJunkPdfTitle("Model Based Systems Engineering: A Survey", "paper.pdf"),

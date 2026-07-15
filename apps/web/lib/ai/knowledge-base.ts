@@ -383,6 +383,12 @@ const JUNK_TITLE_VALUES = new Set([
   "untitled",
   "untitled document",
   "untitled-1",
+  // PowerPoint's PDF export writes its own generic UI label as the Title
+  // (locale-dependent) — seen live on real lecture-slide exports.
+  "powerpoint-präsentation",
+  "powerpoint presentation",
+  "präsentation",
+  "presentation",
 ]);
 
 // A PDF's Title metadata field is frequently either blank, a literal

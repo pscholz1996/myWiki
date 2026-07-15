@@ -239,12 +239,23 @@ export async function POST(req: Request) {
         // verification) should still save whatever text was actually
         // generated, not throw it away along with the failure.
         const persistAssistantReply = async (): Promise<AiConversation> => {
+          // A turn that produced no text must never persist as a silently
+          // blank bubble — the toast that explains it is gone after seconds,
+          // but the conversation is forever. Store the reason ON the message
+          // so the transcript itself says what happened (seen live: a plan
+          // rate limit rejecting the turn left an empty answer with no clue).
+          const failureNote =
+            assistantText.trim().length === 0
+              ? (turnErrorMessage ??
+                "The assistant turn ended without producing an answer — likely a transient error. Please ask again.")
+              : turnErrorMessage;
           const assistantMessage: AiMessage = {
             id: randomUUID(),
             role: "assistant",
             content: assistantText.trim(),
             createdAt: nowIso(),
             usage,
+            error: failureNote,
             citations: citations.length > 0 ? citations : undefined,
           };
           const nextConversation = appendMessage(
