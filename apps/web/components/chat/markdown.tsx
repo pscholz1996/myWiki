@@ -42,7 +42,6 @@ function FigureImage(props: ComponentProps<"img">) {
       className="my-3 block w-fit max-w-full cursor-zoom-in"
       title="Open full size"
     >
-      {/* biome-ignore lint/performance/noImgElement: dynamic same-origin API images */}
       <img
         src={props.src}
         alt={props.alt ?? ""}

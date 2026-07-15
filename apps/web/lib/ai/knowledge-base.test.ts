@@ -513,7 +513,12 @@ describe("isJunkPdfTitle", () => {
   });
 
   test("rejects PowerPoint export placeholder titles (seen on real lecture slides)", () => {
-    expect(isJunkPdfTitle("PowerPoint-Präsentation", "5_Systems_Engineering_SS2025.pdf")).toBe(true);
+    expect(
+      isJunkPdfTitle(
+        "PowerPoint-Präsentation",
+        "5_Systems_Engineering_SS2025.pdf",
+      ),
+    ).toBe(true);
     expect(isJunkPdfTitle("PowerPoint Presentation", "slides.pdf")).toBe(true);
   });
 

@@ -56,7 +56,6 @@ export function MermaidBlock({ code }: { code: string }) {
     return (
       <div
         className="my-3 flex justify-center overflow-x-auto rounded-lg border bg-background p-3 [&_svg]:h-auto [&_svg]:max-w-full"
-        // biome-ignore lint/security/noDangerouslySetInnerHtml: mermaid output with securityLevel "strict"
         dangerouslySetInnerHTML={{ __html: svg }}
       />
     );
