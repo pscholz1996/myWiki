@@ -140,3 +140,67 @@ export async function lookupCrossrefMetadata(
     doi: typeof best.DOI === "string" ? best.DOI : undefined,
   };
 }
+
+/**
+ * Publisher PDFs (Elsevier especially) often carry the DOI — sometimes AS
+ * the Title field. A DOI is an exact key, so when one is present, resolving
+ * it beats any fuzzy bibliographic search: /works/{doi} either returns the
+ * one true record or 404s.
+ */
+export function extractDoi(text: string): string | undefined {
+  const match = text.match(/\b(10\.\d{4,9}\/[^\s"'<>]+)/);
+  return match ? match[1].replace(/[).,;]+$/, "") : undefined;
+}
+
+export async function lookupCrossrefByDoi(
+  doi: string,
+): Promise<CrossrefMetadata | undefined> {
+  const url = `${CROSSREF_API}/${encodeURIComponent(doi)}`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), CROSSREF_TIMEOUT_MS);
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      headers: {
+        "User-Agent": "OpenLatex/0.1 (+https://github.com/xTazah/OpenLatex)",
+      },
+      signal: controller.signal,
+    });
+  } catch {
+    return undefined;
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  if (!response.ok) return undefined;
+
+  let data: unknown;
+  try {
+    data = await response.json();
+  } catch {
+    return undefined;
+  }
+
+  const item = (data as { message?: Record<string, unknown> })?.message;
+  const title = Array.isArray(item?.title) ? item.title[0] : undefined;
+  if (!item || typeof title !== "string" || !title.trim()) return undefined;
+
+  const rawAuthors = Array.isArray(item.author) ? item.author : [];
+  const authors = rawAuthors
+    .map((author) => {
+      const a = author as { given?: unknown; family?: unknown };
+      return [a.given, a.family]
+        .filter((part): part is string => typeof part === "string" && part.length > 0)
+        .join(" ")
+        .trim();
+    })
+    .filter((name) => name.length > 0);
+
+  return {
+    title: title.trim(),
+    authors,
+    year: extractCrossrefYear(item),
+    doi: typeof item.DOI === "string" ? item.DOI : doi,
+  };
+}

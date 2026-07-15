@@ -16,7 +16,12 @@ import {
   tokenize,
   type Bm25Index,
 } from "@/lib/ai/lexical-search";
-import { lookupCrossrefMetadata, titleSimilarity } from "@/lib/ai/crossref";
+import {
+  extractDoi,
+  lookupCrossrefByDoi,
+  lookupCrossrefMetadata,
+  titleSimilarity,
+} from "@/lib/ai/crossref";
 
 export type {
   AiManifest,
@@ -817,7 +822,13 @@ async function enrichMetadataWithCrossref(
 ): Promise<AiSourceMetadata> {
   if (!metadata.title) return metadata;
 
-  const crossref = await lookupCrossrefMetadata(metadata.title);
+  // Publisher PDFs (notably Elsevier) sometimes put the DOI in the Title
+  // field. A DOI resolves to exactly one CrossRef record — no similarity
+  // threshold needed — so it wins over fuzzy title search when present.
+  const doi = extractDoi(metadata.title) ?? (metadata.doi ? extractDoi(metadata.doi) : undefined);
+  const crossref = doi
+    ? ((await lookupCrossrefByDoi(doi)) ?? (await lookupCrossrefMetadata(metadata.title)))
+    : await lookupCrossrefMetadata(metadata.title);
   if (!crossref) return metadata;
 
   const hasCrossrefAuthors = crossref.authors.length > 0;

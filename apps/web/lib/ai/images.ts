@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { createCanvas, loadImage } from "@napi-rs/canvas";
 import JSZip from "jszip";
 import {
@@ -114,6 +115,41 @@ export function imageUrl(record: AiImageRecord): string {
 }
 
 /**
+ * Locates pdfjs-dist's on-disk asset directories (wasm decoders, standard
+ * fonts) by walking up from cwd. Deliberately NOT require.resolve():
+ * Turbopack rewrites module resolution inside bundled server code to
+ * virtual "[externals]/..." paths that are unusable as file URLs — this
+ * function needs the real filesystem location. pnpm hoists pdfjs-dist to
+ * the workspace-root node_modules, one or two levels above apps/web.
+ */
+let pdfjsAssetRootPromise: Promise<string | null> | null = null;
+
+function findPdfjsAssetRoot(): Promise<string | null> {
+  if (!pdfjsAssetRootPromise) {
+    pdfjsAssetRootPromise = (async () => {
+      let dir = process.cwd();
+      for (let depth = 0; depth < 6; depth += 1) {
+        const candidate = path.join(dir, "node_modules", "pdfjs-dist");
+        try {
+          await fs.access(path.join(candidate, "wasm", "jbig2.wasm"));
+          return candidate;
+        } catch {
+          // keep walking up
+        }
+        const parent = path.dirname(dir);
+        if (parent === dir) break;
+        dir = parent;
+      }
+      console.warn(
+        "pdfjs-dist asset directory not found — page renders will skip JBIG2/JPX-encoded figures",
+      );
+      return null;
+    })();
+  }
+  return pdfjsAssetRootPromise;
+}
+
+/**
  * Renders a PDF page to PNG. Scale is chosen so the longer edge lands near
  * MAX_RENDER_DIMENSION — enough for the model to read figure labels, small
  * enough to keep vision-token cost and payload size sane.
@@ -137,7 +173,18 @@ export async function renderPdfPage(
   const pdfjs: typeof import("pdfjs-dist/legacy/build/pdf.mjs") = await import(
     "pdfjs-dist/legacy/build/pdf.mjs"
   );
-  const document = await pdfjs.getDocument({ data }).promise;
+  // Without these asset URLs, pages render but JBIG2/JPEG2000-encoded
+  // images (common in scanned or older publisher PDFs) are silently
+  // dropped — exactly the figures this renderer exists to capture.
+  const pdfjsRoot = await findPdfjsAssetRoot();
+  const assetUrls = pdfjsRoot
+    ? {
+        wasmUrl: `${pathToFileURL(path.join(pdfjsRoot, "wasm")).href}/`,
+        standardFontDataUrl: `${pathToFileURL(path.join(pdfjsRoot, "standard_fonts")).href}/`,
+        iccUrl: `${pathToFileURL(path.join(pdfjsRoot, "iccs")).href}/`,
+      }
+    : {};
+  const document = await pdfjs.getDocument({ data, ...assetUrls }).promise;
   if (page < 1 || page > document.numPages) {
     throw new Error(`Page ${page} out of range (1-${document.numPages})`);
   }

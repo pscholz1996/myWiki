@@ -1,5 +1,29 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { lookupCrossrefMetadata, titleSimilarity } from "./crossref";
+import { extractDoi, lookupCrossrefMetadata, titleSimilarity } from "./crossref";
+
+describe("extractDoi", () => {
+  test("extracts from an Elsevier-style doi: title", () => {
+    expect(extractDoi("doi:10.1016/j.trb.2003.07.001")).toBe(
+      "10.1016/j.trb.2003.07.001",
+    );
+  });
+
+  test("extracts from a doi.org URL", () => {
+    expect(extractDoi("https://doi.org/10.1109/TSE.2019.2921345")).toBe(
+      "10.1109/TSE.2019.2921345",
+    );
+  });
+
+  test("strips trailing punctuation", () => {
+    expect(extractDoi("See 10.1000/xyz123.")).toBe("10.1000/xyz123");
+  });
+
+  test("returns undefined for a normal title", () => {
+    expect(
+      extractDoi("A new regret insertion heuristic for dial-a-ride problems"),
+    ).toBeUndefined();
+  });
+});
 
 describe("titleSimilarity", () => {
   test("is 1 for identical titles", () => {
