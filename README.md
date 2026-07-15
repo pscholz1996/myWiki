@@ -18,8 +18,11 @@ with the entire LaTeX/editor/writing layer removed.
 ## What it does
 
 - **Chat-first UI** — a clean, Claude-like page; no editor, no projects.
-- **Grounded answers** — hybrid semantic + keyword search over your indexed
-  sources; broad multi-angle retrieval before synthesizing.
+- **Grounded answers** — hybrid multilingual search (semantic + full-text,
+  SQLite FTS5 + sqlite-vec) over your indexed sources; German questions
+  find English sources and vice versa; broad multi-angle retrieval before
+  synthesizing. Per-source digests (abstract + section outline) let the
+  assistant plan where to read instead of searching blind.
 - **Visible knowledge boundary** — parts answered from general knowledge are
   explicitly marked; source-backed claims can carry verified, clickable
   source chips (source + page, opens the PDF).
@@ -33,8 +36,9 @@ with the entire LaTeX/editor/writing layer removed.
 
 - [x] Chat-first UI pivot (no editor, sources in background, visual answers)
 - [x] Ingestion upgrade: Docling layout-aware conversion (optional sidecar)
-- [ ] Index upgrade: SQLite FTS5 + LanceDB for 500–5,000 sources
-- [ ] Source figures as visual answers (return actual diagrams from PDFs)
+- [x] Source figures as visual answers (original diagrams from PDFs/slides)
+- [x] Index v2: SQLite FTS5 + sqlite-vec, multilingual embeddings
+- [x] Conversation history, keep-answer-as-note, copy-as-markdown
 
 ## Development
 
