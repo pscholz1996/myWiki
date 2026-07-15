@@ -858,16 +858,28 @@ interface ExtractionCacheEntry {
   pages: Array<{ page: number | null; text: string }>;
 }
 
-function extractionCachePath(projectDir: string, sourceId: string): string {
-  return path.join(projectDir, ".mywiki", "ai", "extracted", `${sourceId}.json`);
+/**
+ * Content-addressed when possible: keyed by the source's contentHash, not
+ * its id. Same bytes -> same extraction, so an interrupted bulk upload can
+ * resume without redoing Docling work (the re-upload assigns fresh ids,
+ * but the hashes — and therefore the caches — still match). Notes have no
+ * contentHash (their content changes in place), so they fall back to id,
+ * which also makes note-update invalidation work.
+ */
+function extractionCacheKey(source: Pick<AiSourceRecord, "id" | "contentHash">): string {
+  return source.contentHash ?? source.id;
+}
+
+function extractionCachePath(projectDir: string, cacheKey: string): string {
+  return path.join(projectDir, ".mywiki", "ai", "extracted", `${cacheKey}.json`);
 }
 
 async function readExtractionCache(
   projectDir: string,
-  sourceId: string,
+  cacheKey: string,
 ): Promise<ExtractionCacheEntry | null> {
   try {
-    const raw = await fs.readFile(extractionCachePath(projectDir, sourceId), "utf8");
+    const raw = await fs.readFile(extractionCachePath(projectDir, cacheKey), "utf8");
     const parsed = JSON.parse(raw) as ExtractionCacheEntry;
     return Array.isArray(parsed.pages) ? parsed : null;
   } catch {
@@ -877,19 +889,21 @@ async function readExtractionCache(
 
 async function writeExtractionCache(
   projectDir: string,
-  sourceId: string,
+  cacheKey: string,
   entry: ExtractionCacheEntry,
 ): Promise<void> {
-  const cachePath = extractionCachePath(projectDir, sourceId);
+  const cachePath = extractionCachePath(projectDir, cacheKey);
   await fs.mkdir(path.dirname(cachePath), { recursive: true });
   await fs.writeFile(cachePath, JSON.stringify(entry), "utf8");
 }
 
 async function removeExtractionCache(
   projectDir: string,
-  sourceId: string,
+  source: Pick<AiSourceRecord, "id" | "contentHash">,
 ): Promise<void> {
-  await fs.rm(extractionCachePath(projectDir, sourceId), { force: true });
+  await fs.rm(extractionCachePath(projectDir, extractionCacheKey(source)), {
+    force: true,
+  });
 }
 
 /**
@@ -903,7 +917,7 @@ async function getExtractedPages(
   projectDir: string,
   source: AiSourceRecord,
 ): Promise<ExtractionCacheEntry> {
-  const cached = await readExtractionCache(projectDir, source.id);
+  const cached = await readExtractionCache(projectDir, extractionCacheKey(source));
   if (cached) return cached;
 
   const sourcePath = path.join(
@@ -949,7 +963,7 @@ async function getExtractedPages(
     };
   }
 
-  await writeExtractionCache(projectDir, source.id, entry);
+  await writeExtractionCache(projectDir, extractionCacheKey(source), entry);
   return entry;
 }
 
@@ -1320,7 +1334,7 @@ export async function deleteAiSources(
   await Promise.all(
     removed.flatMap((source) => [
       fs.rm(path.join(sourcesDir, source.storedName), { force: true }),
-      removeExtractionCache(projectDir, source.id),
+      removeExtractionCache(projectDir, source),
     ]),
   );
   await removeSourcesFromIndex(
@@ -1398,7 +1412,7 @@ export async function saveResearchNote(params: {
     // The note's content just changed on disk — a cached extraction from
     // the previous version would silently win over the new text in
     // getExtractedPages, so it must go before re-indexing.
-    await removeExtractionCache(params.projectDir, id);
+    await removeExtractionCache(params.projectDir, { id });
   }
   await appendSourcesToIndex(params.projectDir, [record]);
 
@@ -1445,7 +1459,7 @@ export async function rebuildAiIndex(
     metadataById.set(source.id, metaOnly.metadata);
 
     if (reextract) {
-      await removeExtractionCache(projectDir, source.id);
+      await removeExtractionCache(projectDir, source);
     }
     const extracted = await getExtractedPages(projectDir, source);
     digestById.set(source.id, buildSourceDigest(extracted.pages));
