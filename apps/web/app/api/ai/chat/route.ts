@@ -85,7 +85,7 @@ function friendlySdkError(code: string | undefined | null): string | undefined {
     case "max_output_tokens":
       return "The response hit the maximum output length before finishing.";
     case "error_max_turns":
-      return "The assistant used too many tool calls for this turn and stopped early. Try a more specific request.";
+      return "The assistant hit the safety cap on tool calls for a single turn and stopped. Say \"continue\" to let it pick up where it left off.";
     case "error_max_budget_usd":
       return "This turn exceeded its cost budget and was stopped.";
     case "error_max_structured_output_retries":

@@ -746,7 +746,13 @@ class LiveSession {
           mywiki: createMyWikiMcpServer(options.cwd, options.sourceIds),
         },
         includePartialMessages: true,
-        maxTurns: 8,
+        // Generous on purpose: a single grounded answer legitimately chains
+        // many tool calls (multi-angle searches, browse, several page
+        // reads, render/crop/annotate figures, cite()) — a tight cap makes
+        // exactly the thorough answers this app exists for "stop early"
+        // (seen live at 8). This is a runaway-loop backstop, not a budget;
+        // the real spend control is the user's plan limit.
+        maxTurns: 100,
         model: options.model,
         // Long research conversations can exceed the context window. The
         // SDK (the same engine behind Claude Code) already knows how to
