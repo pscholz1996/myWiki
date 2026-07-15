@@ -3,7 +3,11 @@
 import { useEffect, useRef, useState } from "react";
 import {
   ArrowUpIcon,
+  BookmarkPlusIcon,
+  CheckIcon,
+  CopyIcon,
   FolderOpenIcon,
+  HistoryIcon,
   LibraryBigIcon,
   Loader2Icon,
   MonitorIcon,
@@ -12,6 +16,7 @@ import {
   ShieldCheckIcon,
   SquarePenIcon,
   SunIcon,
+  Trash2Icon,
 } from "lucide-react";
 import { SiClaude } from "@icons-pack/react-simple-icons";
 import { useTheme } from "next-themes";
@@ -30,10 +35,82 @@ import { TooltipIconButton } from "@/components/ui/tooltip-icon-button";
 import { ClaudeAccountMenu } from "@/components/account/claude-account-menu";
 import { DirectoryBrowserModal } from "@/components/project/directory-browser-modal";
 import { useAiStore } from "@/stores/ai-store";
-import type { AiPlanUsage } from "@/lib/ai/types";
+import type { AiMessage, AiPlanUsage } from "@/lib/ai/types";
 import { basename } from "@/lib/project/path-utils";
 import { AiMarkdown } from "./markdown";
 import { SourcesDialog } from "./sources-dialog";
+
+// "vor 3 Std." style relative timestamps would need i18n — a compact
+// absolute date is unambiguous in any language.
+function formatConversationDate(iso: string): string {
+  const date = new Date(iso);
+  const now = new Date();
+  const sameDay = date.toDateString() === now.toDateString();
+  return sameDay
+    ? date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
+    : date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+/** Copy + keep-as-note, shown under every completed assistant answer. */
+function AnswerActions({ message }: { message: AiMessage }) {
+  const keepAnswerAsNote = useAiStore((state) => state.keepAnswerAsNote);
+  const [copied, setCopied] = useState(false);
+  const [keeping, setKeeping] = useState(false);
+  const [kept, setKept] = useState(false);
+
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(message.content);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1600);
+  };
+
+  const handleKeep = async () => {
+    setKeeping(true);
+    try {
+      await keepAnswerAsNote(message);
+      setKept(true);
+      toast.success("Saved to your knowledge base", {
+        description: "The answer is now an indexed research note.",
+      });
+    } catch (error) {
+      toast.error("Could not save note", {
+        description: error instanceof Error ? error.message : undefined,
+      });
+    } finally {
+      setKeeping(false);
+    }
+  };
+
+  return (
+    <div className="mt-2 flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+      <TooltipIconButton
+        tooltip={copied ? "Copied" : "Copy as markdown"}
+        onClick={() => void handleCopy()}
+      >
+        {copied ? (
+          <CheckIcon className="size-3.5 text-green-600" />
+        ) : (
+          <CopyIcon className="size-3.5" />
+        )}
+      </TooltipIconButton>
+      <TooltipIconButton
+        tooltip={
+          kept ? "Saved as note" : "Keep in knowledge base (saves as a note)"
+        }
+        onClick={() => void handleKeep()}
+        disabled={keeping || kept}
+      >
+        {kept ? (
+          <CheckIcon className="size-3.5 text-green-600" />
+        ) : keeping ? (
+          <Loader2Icon className="size-3.5 animate-spin" />
+        ) : (
+          <BookmarkPlusIcon className="size-3.5" />
+        )}
+      </TooltipIconButton>
+    </div>
+  );
+}
 
 // "in 2h 44m" / "in 44m" — a short countdown to a reset timestamp, matching
 // the Claude app's own usage view rather than a full date/time.
@@ -237,7 +314,11 @@ export function ChatApp({ current }: ChatAppProps) {
   const loadSources = useAiStore((state) => state.loadSources);
   const loadConversation = useAiStore((state) => state.loadConversation);
   const loadPlanUsage = useAiStore((state) => state.loadPlanUsage);
-  const clearConversation = useAiStore((state) => state.clearConversation);
+  const conversations = useAiStore((state) => state.conversations);
+  const loadConversations = useAiStore((state) => state.loadConversations);
+  const startNewConversation = useAiStore((state) => state.startNewConversation);
+  const switchConversation = useAiStore((state) => state.switchConversation);
+  const removeConversation = useAiStore((state) => state.removeConversation);
   const sendMessage = useAiStore((state) => state.sendMessage);
   const compactionNotice = useAiStore((state) => state.compactionNotice);
   const dismissCompactionNotice = useAiStore(
@@ -258,8 +339,13 @@ export function ChatApp({ current }: ChatAppProps) {
     chatLoading && messages[messages.length - 1]?.role === "user";
 
   useEffect(() => {
-    void Promise.all([loadSources(), loadConversation(), loadPlanUsage()]);
-  }, [loadConversation, loadPlanUsage, loadSources]);
+    void Promise.all([
+      loadSources(),
+      loadConversation(),
+      loadPlanUsage(),
+      loadConversations(),
+    ]);
+  }, [loadConversation, loadConversations, loadPlanUsage, loadSources]);
 
   useEffect(() => {
     if (error) toast.error(error);
@@ -295,14 +381,24 @@ export function ChatApp({ current }: ChatAppProps) {
     });
   };
 
+  // Non-destructive: the current conversation stays in history.
   const handleNewChat = async () => {
     if (!hasMessages) return;
-    const confirmed = window.confirm(
-      "Start a new chat? The current conversation will be deleted.",
-    );
+    try {
+      await startNewConversation();
+    } catch {
+      // Store already captures the error.
+    }
+  };
+
+  const handleDeleteConversation = async (
+    conversationId: string,
+    title: string,
+  ) => {
+    const confirmed = window.confirm(`Delete "${title}" from history?`);
     if (!confirmed) return;
     try {
-      await clearConversation();
+      await removeConversation(conversationId);
     } catch {
       // Store already captures the error.
     }
@@ -335,6 +431,66 @@ export function ChatApp({ current }: ChatAppProps) {
           >
             <SquarePenIcon className="size-4" />
           </TooltipIconButton>
+          <DropdownMenu onOpenChange={(open) => open && void loadConversations()}>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-8"
+                title="History"
+                disabled={chatLoading}
+              >
+                <HistoryIcon className="size-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-80">
+              <DropdownMenuLabel className="text-xs">History</DropdownMenuLabel>
+              {conversations.length === 0 ? (
+                <div className="px-2 py-3 text-center text-muted-foreground text-xs">
+                  Past conversations appear here.
+                </div>
+              ) : (
+                conversations.map((entry) => (
+                  <DropdownMenuItem
+                    key={entry.id}
+                    className="group/item flex items-start gap-2"
+                    onSelect={() => {
+                      if (entry.id !== activeConversation?.id) {
+                        void switchConversation(entry.id);
+                      }
+                    }}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div
+                        className={`truncate text-sm ${entry.id === activeConversation?.id ? "font-medium" : ""}`}
+                      >
+                        {entry.title ?? "Untitled conversation"}
+                      </div>
+                      <div className="text-muted-foreground text-xs">
+                        {formatConversationDate(entry.updatedAt)} ·{" "}
+                        {Math.ceil(entry.messageCount / 2)} question
+                        {entry.messageCount > 2 ? "s" : ""}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover/item:opacity-100"
+                      title="Delete conversation"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void handleDeleteConversation(
+                          entry.id,
+                          entry.title ?? "Untitled conversation",
+                        );
+                      }}
+                    >
+                      <Trash2Icon className="size-3.5" />
+                    </button>
+                  </DropdownMenuItem>
+                ))
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Button
             variant="ghost"
             size="sm"
@@ -409,7 +565,7 @@ export function ChatApp({ current }: ChatAppProps) {
                     {message.content}
                   </div>
                 ) : (
-                  <div key={message.id} className="max-w-full">
+                  <div key={message.id} className="group max-w-full">
                     {message.content ? (
                       <AiMarkdown content={message.content} />
                     ) : null}
@@ -432,6 +588,9 @@ export function ChatApp({ current }: ChatAppProps) {
                           </a>
                         ))}
                       </div>
+                    ) : null}
+                    {message.content && !chatLoading ? (
+                      <AnswerActions message={message} />
                     ) : null}
                   </div>
                 ),

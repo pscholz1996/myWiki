@@ -4,6 +4,7 @@ import type {
   AiChatStreamEvent,
   AiCompactionNotice,
   AiConversation,
+  AiConversationSummary,
   AiManifest,
   AiMessage,
   AiPlanUsage,
@@ -14,20 +15,38 @@ import type {
 } from "@/lib/ai/types";
 import { MAIN_CONVERSATION_ID } from "@/lib/ai/types";
 import {
-  clearAiConversation,
+  createConversation,
   deleteAiSource,
+  deleteConversation,
   fetchAiConversation,
   fetchAiManifest,
+  fetchConversationList,
   fetchPlanUsage,
+  saveAnswerAsNote,
   streamAiChat,
   updateAiSourceMetadata,
   uploadAiSources,
 } from "@/lib/ai/ai-client";
 
+// Which conversation the user last had open, per browser. Falling back to
+// the legacy "main" id keeps pre-multi-conversation projects working.
+const ACTIVE_CONVERSATION_KEY = "mywiki-active-conversation";
+
+function readActiveConversationId(): string {
+  if (typeof window === "undefined") return MAIN_CONVERSATION_ID;
+  return localStorage.getItem(ACTIVE_CONVERSATION_KEY) ?? MAIN_CONVERSATION_ID;
+}
+
+function persistActiveConversationId(id: string): void {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(ACTIVE_CONVERSATION_KEY, id);
+}
+
 interface AiState {
   manifest: AiManifest | null;
   sources: AiSourceRecord[];
   activeConversation: AiConversation | null;
+  conversations: AiConversationSummary[];
   currentSourceIds: string[];
   loading: boolean;
   error: string | null;
@@ -48,7 +67,11 @@ interface AiState {
     sourceId: string,
     updates: { title: string; authors: string[]; year: string },
   ) => Promise<void>;
-  clearConversation: () => Promise<void>;
+  loadConversations: () => Promise<void>;
+  startNewConversation: () => Promise<void>;
+  switchConversation: (conversationId: string) => Promise<void>;
+  removeConversation: (conversationId: string) => Promise<void>;
+  keepAnswerAsNote: (message: AiMessage) => Promise<void>;
   sendMessage: (message: string) => Promise<void>;
   toggleSourceSelection: (sourceId: string) => void;
 }
@@ -129,6 +152,7 @@ export const useAiStore = create<AiState>((set, get) => ({
   manifest: null,
   sources: [],
   activeConversation: null,
+  conversations: [],
   currentSourceIds: [],
   loading: false,
   error: null,
@@ -159,7 +183,7 @@ export const useAiStore = create<AiState>((set, get) => ({
   async loadConversation() {
     set({ loading: true, error: null });
     try {
-      const conversation = await fetchAiConversation();
+      const conversation = await fetchAiConversation(readActiveConversationId());
       set({
         activeConversation: conversation,
         currentSourceIds: conversation?.sourceIds ?? [],
@@ -276,23 +300,100 @@ export const useAiStore = create<AiState>((set, get) => ({
   // genuinely fresh Claude Agent SDK session — there's only ever one
   // conversation, so "clear" is the only reset this app offers instead of
   // switching to a different one.
-  async clearConversation() {
+  async loadConversations() {
+    try {
+      set({ conversations: await fetchConversationList() });
+    } catch {
+      // History list is a convenience — a failed load shouldn't block chat.
+    }
+  },
+
+  // "New chat" is non-destructive now: the current conversation stays in
+  // history; a fresh one simply becomes active.
+  async startNewConversation() {
     set({ actionLoading: true, error: null });
     try {
-      await clearAiConversation();
-      // The live SDK session is closed server-side along with the
-      // conversation file (see DELETE /api/ai/conversation) — usage data
-      // won't be available again until the next message starts a new one.
-      set({ activeConversation: null, planUsage: null });
+      const conversation = await createConversation();
+      persistActiveConversationId(conversation.id);
+      set({
+        activeConversation: conversation,
+        currentSourceIds: conversation.sourceIds,
+        planUsage: null,
+      });
+      await get().loadConversations();
     } catch (error) {
       set({
         error:
-          error instanceof Error ? error.message : "Failed to clear conversation",
+          error instanceof Error ? error.message : "Failed to start conversation",
       });
       throw error;
     } finally {
       set({ actionLoading: false });
     }
+  },
+
+  async switchConversation(conversationId: string) {
+    set({ actionLoading: true, error: null });
+    try {
+      const conversation = await fetchAiConversation(conversationId);
+      if (!conversation) throw new Error("Conversation not found");
+      persistActiveConversationId(conversationId);
+      set({
+        activeConversation: conversation,
+        currentSourceIds: conversation.sourceIds,
+        planUsage: null,
+      });
+    } catch (error) {
+      set({
+        error:
+          error instanceof Error ? error.message : "Failed to open conversation",
+      });
+      throw error;
+    } finally {
+      set({ actionLoading: false });
+    }
+  },
+
+  async removeConversation(conversationId: string) {
+    set({ actionLoading: true, error: null });
+    try {
+      await deleteConversation(conversationId);
+      const wasActive = get().activeConversation?.id === conversationId;
+      if (wasActive) {
+        persistActiveConversationId(MAIN_CONVERSATION_ID);
+        set({ activeConversation: null, planUsage: null });
+      }
+      await get().loadConversations();
+    } catch (error) {
+      set({
+        error:
+          error instanceof Error ? error.message : "Failed to delete conversation",
+      });
+      throw error;
+    } finally {
+      set({ actionLoading: false });
+    }
+  },
+
+  async keepAnswerAsNote(message: AiMessage) {
+    const conversation = get().activeConversation;
+    // Title from the question this answer responded to — the message right
+    // before it in the transcript.
+    const messages = conversation?.messages ?? [];
+    const index = messages.findIndex((entry) => entry.id === message.id);
+    const question = [...messages.slice(0, Math.max(index, 0))]
+      .reverse()
+      .find((entry) => entry.role === "user");
+    await saveAnswerAsNote({
+      title: question?.content.slice(0, 120) ?? "Saved answer",
+      content: message.content,
+      drawsOnSourceIds: [
+        ...new Set((message.citations ?? []).map((c) => c.sourceId)),
+      ],
+    });
+    // The note is a new indexed source — refresh so the Sources dialog and
+    // future searches see it without a manual reload.
+    await get().loadSources();
   },
 
   async sendMessage(message: string) {
@@ -305,7 +406,7 @@ export const useAiStore = create<AiState>((set, get) => ({
     }
 
     const activeConversation: AiConversation = get().activeConversation ?? {
-      id: MAIN_CONVERSATION_ID,
+      id: readActiveConversationId(),
       model: "claude-sonnet-5",
       // Optimistic placeholder only — never sent to the server (AiChatRequest
       // has no sdkSessionId field) and overwritten once the real conversation
@@ -328,6 +429,7 @@ export const useAiStore = create<AiState>((set, get) => ({
 
     const request: AiChatRequest = {
       message: trimmed,
+      conversationId: nextConversation.id,
       sourceIds: nextConversation.sourceIds,
       model: nextConversation.model,
     };
@@ -400,6 +502,9 @@ export const useAiStore = create<AiState>((set, get) => ({
       // this is the earliest point plan usage becomes available — refresh
       // it opportunistically rather than waiting for the next full mount.
       void get().loadPlanUsage();
+      // The first turn assigns the conversation its title — refresh the
+      // history list so it shows up right away.
+      void get().loadConversations();
     } catch (error) {
       set({
         error:

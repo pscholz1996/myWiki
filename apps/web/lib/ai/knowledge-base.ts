@@ -10,12 +10,14 @@ import type {
   AiUploadProgressEvent,
 } from "@/lib/ai/types";
 import {
-  buildBm25Index,
-  reciprocalRankFusion,
-  scoreBm25,
-  tokenize,
-  type Bm25Index,
-} from "@/lib/ai/lexical-search";
+  clearIndexDb,
+  deleteChunksBySource,
+  getIndexChunkCount,
+  getIndexDimensions,
+  insertChunks,
+  openIndexDb,
+  searchHybrid,
+} from "@/lib/ai/index-db";
 import {
   extractDoi,
   lookupCrossrefByDoi,
@@ -39,6 +41,12 @@ export interface AiChunkRecord {
   page: number | null;
   charStart: number;
   charEnd: number;
+  /**
+   * Section breadcrumb ("3.2 Verification process") from Docling's `## `
+   * markers. Search-context only — chunk `text` stays a verbatim substring
+   * of the page so cite() verification is never affected.
+   */
+  heading?: string;
   text: string;
 }
 
@@ -55,9 +63,16 @@ const AI_DIR = [".mywiki", "ai"] as const;
 const SOURCES_DIR = [".mywiki", "ai", "sources"] as const;
 const INDEX_DIR = [".mywiki", "ai", "index"] as const;
 const MANIFEST_FILE = "manifest.json";
+// Legacy pre-SQLite index files — only referenced by the one-time migration
+// that rebuilds them into index.db.
 const CHUNKS_FILE = "chunks.jsonl";
 const EMBEDDINGS_FILE = "embeddings.bin";
-const EMBEDDING_MODEL = "Xenova/all-MiniLM-L6-v2";
+// Multilingual on purpose: the corpus and the questions mix German and
+// English (norms, German lecture slides, English papers), and the previous
+// English-only MiniLM model silently degraded every cross-lingual lookup.
+// E5-family models expect "query: "/"passage: " prefixes — embedTexts adds
+// them; raw un-prefixed text would embed into a subtly wrong space.
+const EMBEDDING_MODEL = "Xenova/multilingual-e5-small";
 
 // Anything outside this set falls through extractSourceText's non-PDF
 // branch, which reads the raw bytes as UTF-8 "text" — for a real binary
@@ -153,80 +168,43 @@ async function writeManifest(
   );
 }
 
-async function writeJsonLines(
-  filePath: string,
-  records: AiChunkRecord[],
+/**
+ * One-time migration from the pre-SQLite index (chunks.jsonl +
+ * embeddings.bin). The old vectors were produced by an English-only model,
+ * so they can't be imported — the only correct migration is a full
+ * re-embed, which the extraction caches make cheap (no Docling/pdfjs
+ * re-parse, just re-chunk + re-embed). Runs lazily on the first index
+ * operation that notices legacy files, then renames them out of the way so
+ * it never runs twice.
+ */
+async function migrateLegacyIndexIfNeeded(
+  projectDir: string,
+  manifest: AiManifest,
 ): Promise<void> {
-  const content = `${records.map((record) => JSON.stringify(record)).join("\n")}\n`;
-  await fs.writeFile(filePath, content, "utf8");
-}
-
-async function writeEmbeddingMatrix(
-  filePath: string,
-  vectors: number[][],
-): Promise<number> {
-  if (vectors.length === 0) {
-    await fs.writeFile(filePath, Buffer.alloc(0));
-    return 0;
+  const { indexDir } = await ensureAiWorkspace(projectDir);
+  const legacyChunksPath = path.join(indexDir, CHUNKS_FILE);
+  try {
+    await fs.access(legacyChunksPath);
+  } catch {
+    return; // no legacy files — nothing to migrate
   }
 
-  const dimensions = vectors[0]?.length ?? 0;
-  const buffer = Buffer.alloc(vectors.length * dimensions * 4);
-  const view = new Float32Array(
-    buffer.buffer,
-    buffer.byteOffset,
-    vectors.length * dimensions,
+  console.warn(
+    `Legacy knowledge-base index found in ${indexDir} — re-embedding ${manifest.sources.length} sources into index.db (one-time migration)`,
   );
-
-  let offset = 0;
-  for (const vector of vectors) {
-    if (vector.length !== dimensions) {
-      throw new Error("Embedding dimensions do not match");
-    }
-    view.set(vector, offset);
-    offset += dimensions;
-  }
-
-  await fs.writeFile(filePath, buffer);
-  return dimensions;
-}
-
-// embedTexts always calls the pipeline with normalize: true, so every
-// stored vector and every query vector already has unit L2 norm — cosine
-// similarity between two unit vectors is exactly their dot product, no
-// need to (re-)compute and divide by magnitudes on every comparison.
-function dotProduct(left: Float32Array, right: Float32Array): number {
-  let dot = 0;
-  for (let index = 0; index < left.length; index += 1) {
-    dot += (left[index] ?? 0) * (right[index] ?? 0);
-  }
-  return dot;
-}
-
-async function readJsonLines<T>(filePath: string): Promise<T[]> {
-  try {
-    const raw = await fs.readFile(filePath, "utf8");
-    const lines = raw
-      .split("\n")
-      .map((line) => line.trim())
-      .filter(Boolean);
-    return lines.map((line) => JSON.parse(line) as T);
-  } catch {
-    return [];
-  }
-}
-
-async function readEmbeddingMatrix(filePath: string): Promise<Float32Array> {
-  try {
-    const buffer = await fs.readFile(filePath);
-    return new Float32Array(
-      buffer.buffer,
-      buffer.byteOffset,
-      buffer.byteLength / 4,
-    );
-  } catch {
-    return new Float32Array();
-  }
+  const rebuilt = await rebuildAiIndex(projectDir, undefined, {
+    reextract: false,
+  });
+  await writeManifest(projectDir, rebuilt);
+  await fs
+    .rename(legacyChunksPath, `${legacyChunksPath}.migrated`)
+    .catch(() => {});
+  await fs
+    .rename(
+      path.join(indexDir, EMBEDDINGS_FILE),
+      `${path.join(indexDir, EMBEDDINGS_FILE)}.migrated`,
+    )
+    .catch(() => {});
 }
 
 async function getEmbeddingPipeline() {
@@ -237,109 +215,16 @@ async function getEmbeddingPipeline() {
   return embeddingPipelinePromise;
 }
 
-// searchAiKnowledgeBase used to re-read and re-parse the entire index
-// (every chunk's JSON line, every embedding row) from disk on every single
-// call. Fine at a handful of sources; a real cost at a large knowledge
-// base. Cache the parsed data in memory, keyed by index directory, and
-// only re-read when the underlying files have actually changed.
-//
-// mtime-checked rather than purely explicit-invalidation: this project
-// already shipped and had to fix a cache that went stale independently per
-// route because a dev-mode bundler could give different API routes
-// different module instances, each with their own "cached" state (see
-// lib/fs/project-dir.ts's getProjectDir doc comment). An mtime check costs
-// two stat() calls and makes correctness not depend on every writer
-// remembering to invalidate — cheap insurance against the same failure
-// class recurring here.
-interface KbCache {
-  chunksMtimeMs: number;
-  embeddingsMtimeMs: number;
-  chunkRecords: AiChunkRecord[];
-  embeddingMatrix: Float32Array;
-  // Built once per cache load (tokenizing/indexing 30k+ chunks isn't free),
-  // not per query — the same reasoning as caching the parsed chunks/vectors.
-  bm25Index: Bm25Index;
-}
-
-const KB_CACHE_MAX_ENTRIES = 3;
-const kbCacheByIndexDir = new Map<string, KbCache>();
-
-function touchKbCache(indexDir: string, cache: KbCache): void {
-  // Map preserves insertion order — delete+reinsert marks this entry as
-  // most-recently-used; the least-recently-used entry is whatever is still
-  // first once we're over the bound.
-  kbCacheByIndexDir.delete(indexDir);
-  kbCacheByIndexDir.set(indexDir, cache);
-  if (kbCacheByIndexDir.size > KB_CACHE_MAX_ENTRIES) {
-    const oldestKey = kbCacheByIndexDir.keys().next().value;
-    if (oldestKey !== undefined) kbCacheByIndexDir.delete(oldestKey);
-  }
-}
-
-async function getKbIndex(indexDir: string): Promise<{
-  chunkRecords: AiChunkRecord[];
-  embeddingMatrix: Float32Array;
-  bm25Index: Bm25Index;
-}> {
-  const chunksPath = path.join(indexDir, CHUNKS_FILE);
-  const embeddingsPath = path.join(indexDir, EMBEDDINGS_FILE);
-
-  let chunksMtimeMs: number;
-  let embeddingsMtimeMs: number;
-  try {
-    const [chunksStat, embeddingsStat] = await Promise.all([
-      fs.stat(chunksPath),
-      fs.stat(embeddingsPath),
-    ]);
-    chunksMtimeMs = chunksStat.mtimeMs;
-    embeddingsMtimeMs = embeddingsStat.mtimeMs;
-  } catch {
-    // Index files don't exist yet — nothing to search.
-    return {
-      chunkRecords: [],
-      embeddingMatrix: new Float32Array(),
-      bm25Index: buildBm25Index([]),
-    };
-  }
-
-  const cached = kbCacheByIndexDir.get(indexDir);
-  if (
-    cached &&
-    cached.chunksMtimeMs === chunksMtimeMs &&
-    cached.embeddingsMtimeMs === embeddingsMtimeMs
-  ) {
-    touchKbCache(indexDir, cached);
-    return cached;
-  }
-
-  const [chunkRecords, embeddingMatrix] = await Promise.all([
-    readJsonLines<AiChunkRecord>(chunksPath),
-    readEmbeddingMatrix(embeddingsPath),
-  ]);
-  const bm25Index = buildBm25Index(
-    chunkRecords.map((chunk) => ({ id: chunk.id, text: chunk.text })),
-  );
-
-  const next: KbCache = {
-    chunksMtimeMs,
-    embeddingsMtimeMs,
-    chunkRecords,
-    embeddingMatrix,
-    bm25Index,
-  };
-  touchKbCache(indexDir, next);
-  return next;
-}
-
-/** Fast-path invalidation after this process writes the index — the mtime
- * check above would eventually catch it anyway, but there's no reason to
- * let a stale entry linger even briefly. */
-function invalidateKbCache(indexDir: string): void {
-  kbCacheByIndexDir.delete(indexDir);
-}
-
+/**
+ * E5 models are trained with asymmetric prefixes: questions embed as
+ * "query: …", corpus text as "passage: …". Mixing them up (or omitting
+ * them) still returns vectors — just from a measurably worse similarity
+ * space, which is the kind of silent quality bug this wrapper exists to
+ * make impossible at call sites.
+ */
 async function embedTexts(
   texts: string[],
+  mode: "query" | "passage",
   onBatchDone?: (done: number, total: number) => void,
 ): Promise<number[][]> {
   if (texts.length === 0) return [];
@@ -347,12 +232,13 @@ async function embedTexts(
   const extractor = await getEmbeddingPipeline();
   const batchSize = 16;
   const vectors: number[][] = [];
+  const prefixed = texts.map((text) => `${mode}: ${text}`);
 
-  for (let index = 0; index < texts.length; index += batchSize) {
-    const batch = texts.slice(index, index + batchSize);
+  for (let index = 0; index < prefixed.length; index += batchSize) {
+    const batch = prefixed.slice(index, index + batchSize);
     const output = await extractor(batch, { pooling: "mean", normalize: true });
     vectors.push(...(output.tolist() as number[][]));
-    onBatchDone?.(vectors.length, texts.length);
+    onBatchDone?.(vectors.length, prefixed.length);
   }
 
   return vectors;
@@ -395,6 +281,95 @@ export function chunkText(
   }
 
   return chunks;
+}
+
+/**
+ * Heading-aware chunking: splits a page's text along Docling's `## `
+ * section markers so a chunk never straddles a section boundary, and tags
+ * every chunk with the section it belongs to. Sources without heading
+ * markers (plain text, pdfjs fallback, notes) degrade to exactly the old
+ * behavior — one section spanning the page.
+ */
+export function chunkPageSections(
+  pageText: string,
+): Array<{ heading?: string; charStart: number; charEnd: number; text: string }> {
+  const lines = pageText.split("\n");
+  const sections: Array<{ heading?: string; text: string }> = [];
+  let currentHeading: string | undefined;
+  let currentLines: string[] = [];
+
+  const flush = () => {
+    const text = currentLines.join("\n").trim();
+    if (text) sections.push({ heading: currentHeading, text });
+    currentLines = [];
+  };
+
+  for (const line of lines) {
+    const headingMatch = line.match(/^##\s+(.+)$/);
+    if (headingMatch) {
+      flush();
+      currentHeading = headingMatch[1].trim();
+      // The heading line itself stays in the section body — it's real page
+      // text (minus the marker) and should remain quotable.
+      currentLines.push(headingMatch[1]);
+    } else {
+      currentLines.push(line);
+    }
+  }
+  flush();
+
+  return sections.flatMap((section) =>
+    chunkText(section.text).map((chunk) => ({
+      ...chunk,
+      heading: section.heading,
+    })),
+  );
+}
+
+interface AiSourceDigest {
+  abstract?: string;
+  outline?: Array<{ page: number | null; heading: string }>;
+}
+
+const DIGEST_ABSTRACT_MAX_CHARS = 700;
+const DIGEST_OUTLINE_MAX_ENTRIES = 40;
+
+/**
+ * A cheap, deterministic per-source digest built at ingest time: the
+ * opening of page 1 (usually the abstract) plus the section outline from
+ * Docling's heading markers. Exposed through browse_knowledge_base so the
+ * agent can PLAN retrieval ("chapter 6 likely covers this — read there")
+ * instead of searching blind, and answer "what does my library say about
+ * X" without twenty speculative searches.
+ */
+export function buildSourceDigest(
+  pages: Array<{ page: number | null; text: string }>,
+): AiSourceDigest | undefined {
+  const firstPage = pages[0]?.text ?? "";
+  const withoutMarkers = firstPage.replace(/^##\s+/gm, "");
+  const abstractSource =
+    withoutMarkers.match(/(?:abstract|zusammenfassung)\s*[:.\n]?\s*([\s\S]+)/i)?.[1] ??
+    withoutMarkers;
+  const abstract = normalizeWhitespace(abstractSource).slice(
+    0,
+    DIGEST_ABSTRACT_MAX_CHARS,
+  );
+
+  const outline: Array<{ page: number | null; heading: string }> = [];
+  for (const page of pages) {
+    for (const line of page.text.split("\n")) {
+      const match = line.match(/^##\s+(.+)$/);
+      if (match) outline.push({ page: page.page, heading: match[1].trim() });
+      if (outline.length >= DIGEST_OUTLINE_MAX_ENTRIES) break;
+    }
+    if (outline.length >= DIGEST_OUTLINE_MAX_ENTRIES) break;
+  }
+
+  if (!abstract && outline.length === 0) return undefined;
+  return {
+    abstract: abstract || undefined,
+    outline: outline.length > 0 ? outline : undefined,
+  };
 }
 
 // PDF-export placeholder titles — confirmed against a real sample of ~20
@@ -986,6 +961,7 @@ async function extractAndChunkSource(
   texts: string[];
   pageCount: number | null;
   metadata: AiSourceMetadata;
+  digest?: AiSourceDigest;
 }> {
   const sourcePath = path.join(
     projectDir,
@@ -1008,7 +984,7 @@ async function extractAndChunkSource(
   const texts: string[] = [];
 
   for (const page of pages) {
-    const pageChunks = chunkText(page.text);
+    const pageChunks = chunkPageSections(page.text);
     for (const [index, chunk] of pageChunks.entries()) {
       records.push({
         id: `${source.id}:${page.page ?? 0}:${index}`,
@@ -1017,9 +993,13 @@ async function extractAndChunkSource(
         page: page.page,
         charStart: chunk.charStart,
         charEnd: chunk.charEnd,
+        heading: chunk.heading,
         text: chunk.text,
       });
-      texts.push(chunk.text);
+      // What gets EMBEDDED carries the breadcrumb ("heading — text") so a
+      // section's context disambiguates its chunks; what gets STORED is the
+      // verbatim text, keeping quotes verifiable.
+      texts.push(chunk.heading ? `${chunk.heading} — ${chunk.text}` : chunk.text);
     }
   }
 
@@ -1028,74 +1008,10 @@ async function extractAndChunkSource(
     texts,
     pageCount,
     metadata: extracted.metadata,
+    digest: buildSourceDigest(pages),
   };
 }
 
-/**
- * Sanity check before appending onto an existing index. A full rewrite
- * (the old strategy) is naturally self-healing — every write recreates
- * the file from scratch. Append-only trades that away for O(new content)
- * write cost, so verify the existing files are in the shape a clean
- * sequence of appends would actually produce before adding more onto
- * them — a torn write from a crash mid-append should surface as a clear,
- * actionable error, not silently misaligned rows. rebuildAiIndex() is the
- * repair path referenced in these errors: a full re-extract/re-embed from
- * the raw source files, which sidesteps whatever is wrong with the index
- * files themselves.
- */
-async function assertIndexIntegrity(
-  chunksPath: string,
-  embeddingsPath: string,
-  dimensions: number,
-  expectedChunkCount: number,
-): Promise<void> {
-  const REPAIR_HINT = "Rebuild the knowledge base index to fix this.";
-
-  const [chunksStat, embeddingsStat] = await Promise.all([
-    fs.stat(chunksPath).catch(() => null),
-    fs.stat(embeddingsPath).catch(() => null),
-  ]);
-
-  if (!chunksStat || !embeddingsStat) {
-    throw new Error(
-      `Knowledge base index is missing chunks.jsonl or embeddings.bin, ` +
-        `but the manifest expects existing content. ${REPAIR_HINT}`,
-    );
-  }
-
-  if (dimensions > 0 && embeddingsStat.size % (dimensions * 4) !== 0) {
-    throw new Error(
-      `Knowledge base index is corrupted: embeddings.bin's size ` +
-        `(${embeddingsStat.size} bytes) isn't a whole multiple of the ` +
-        `embedding row size (${dimensions * 4} bytes). ${REPAIR_HINT}`,
-    );
-  }
-
-  const actualRowCount = dimensions > 0 ? embeddingsStat.size / (dimensions * 4) : 0;
-  if (actualRowCount !== expectedChunkCount) {
-    throw new Error(
-      `Knowledge base index is corrupted: embeddings.bin has ` +
-        `${actualRowCount} rows but the manifest expects ` +
-        `${expectedChunkCount}. ${REPAIR_HINT}`,
-    );
-  }
-
-  if (chunksStat.size > 0) {
-    const lastByte = Buffer.alloc(1);
-    const handle = await fs.open(chunksPath, "r");
-    try {
-      await handle.read(lastByte, 0, 1, chunksStat.size - 1);
-    } finally {
-      await handle.close();
-    }
-    if (lastByte[0] !== 0x0a /* "\n" */) {
-      throw new Error(
-        `Knowledge base index is corrupted: chunks.jsonl does not end ` +
-          `with a newline. ${REPAIR_HINT}`,
-      );
-    }
-  }
-}
 
 /**
  * Appends chunks/embeddings for newly-added sources to the existing index
@@ -1141,26 +1057,14 @@ async function appendSourcesToIndex(
   onProgress?: AiUploadProgressCallback,
 ): Promise<UploadWarning[]> {
   const { indexDir } = await ensureAiWorkspace(projectDir);
-  const chunksPath = path.join(indexDir, CHUNKS_FILE);
-  const embeddingsPath = path.join(indexDir, EMBEDDINGS_FILE);
-
   const manifest = await readManifest(projectDir);
-  const existingDimensions = manifest.embeddingDimensions ?? 0;
-  const existingChunkCount = manifest.index.chunkCount;
-
-  if (existingChunkCount > 0) {
-    await assertIndexIntegrity(
-      chunksPath,
-      embeddingsPath,
-      existingDimensions,
-      existingChunkCount,
-    );
-  }
+  await migrateLegacyIndexIfNeeded(projectDir, manifest);
 
   const newRecords: AiChunkRecord[] = [];
   const newTexts: string[] = [];
   const pageCounts = new Map<string, number | null>();
   const metadataById = new Map<string, AiSourceMetadata>();
+  const digestById = new Map<string, AiSourceDigest | undefined>();
   const warnings: UploadWarning[] = [];
 
   for (const [index, source] of newSources.entries()) {
@@ -1170,13 +1074,12 @@ async function appendSourcesToIndex(
       fileIndex: index,
       fileCount: newSources.length,
     });
-    const { records, texts, pageCount, metadata } = await extractAndChunkSource(
-      projectDir,
-      source,
-    );
+    const { records, texts, pageCount, metadata, digest } =
+      await extractAndChunkSource(projectDir, source);
     newRecords.push(...records);
     newTexts.push(...texts);
     pageCounts.set(source.id, pageCount);
+    digestById.set(source.id, digest);
 
     // CrossRef lookup only for actual papers — never for markdown/text
     // uploads (out of scope, CrossRef doesn't index arbitrary notes) and
@@ -1207,53 +1110,42 @@ async function appendSourcesToIndex(
     }
   }
 
-  const newVectors = await embedTexts(newTexts, (done, total) => {
+  const newVectors = await embedTexts(newTexts, "passage", (done, total) => {
     onProgress?.({ stage: "embedding", chunksDone: done, chunksTotal: total });
   });
-  const dimensions = newVectors[0]?.length ?? existingDimensions;
   onProgress?.({ stage: "indexing" });
 
-  if (newRecords.length > 0) {
-    const chunkLines = `${newRecords.map((record) => JSON.stringify(record)).join("\n")}\n`;
-    await fs.appendFile(chunksPath, chunkLines, "utf8");
-  }
-
-  if (newVectors.length > 0) {
-    const buffer = Buffer.alloc(newVectors.length * dimensions * 4);
-    const view = new Float32Array(
-      buffer.buffer,
-      buffer.byteOffset,
-      newVectors.length * dimensions,
-    );
-    let offset = 0;
-    for (const vector of newVectors) {
-      view.set(vector, offset);
-      offset += dimensions;
-    }
-    await fs.appendFile(embeddingsPath, buffer);
-  }
+  const db = openIndexDb(indexDir);
+  insertChunks(
+    db,
+    newRecords.map((record, index) => ({
+      record,
+      embedding: newVectors[index],
+    })),
+  );
+  const chunkCount = getIndexChunkCount(db);
 
   await writeManifest(projectDir, {
     version: 1,
     updatedAt: nowIso(),
     embeddingModel: EMBEDDING_MODEL,
-    embeddingDimensions: dimensions || existingDimensions || null,
+    embeddingDimensions: getIndexDimensions(db) ?? manifest.embeddingDimensions,
     sources: [
       ...manifest.sources,
       ...newSources.map((source) => ({
         ...source,
         pageCount: pageCounts.get(source.id) ?? source.pageCount,
         metadata: metadataById.get(source.id) ?? source.metadata,
+        digest: digestById.get(source.id) ?? source.digest,
       })),
     ],
     index: {
-      chunkCount: existingChunkCount + newRecords.length,
-      embeddingCount: manifest.index.embeddingCount + newVectors.length,
+      chunkCount,
+      embeddingCount: chunkCount,
       generatedAt: nowIso(),
     },
   });
 
-  invalidateKbCache(indexDir);
   return warnings;
 }
 
@@ -1273,55 +1165,25 @@ async function removeSourcesFromIndex(
 ): Promise<void> {
   const idsToRemove = new Set(sourceIds);
   const { indexDir } = await ensureAiWorkspace(projectDir);
-  const chunksPath = path.join(indexDir, CHUNKS_FILE);
-  const embeddingsPath = path.join(indexDir, EMBEDDINGS_FILE);
-
-  const existingChunks = await readJsonLines<AiChunkRecord>(chunksPath);
-  const existingEmbeddings = await readEmbeddingMatrix(embeddingsPath);
   const manifest = await readManifest(projectDir);
-  const dimensions = manifest.embeddingDimensions ?? 0;
+  await migrateLegacyIndexIfNeeded(projectDir, manifest);
 
-  const keptChunks: AiChunkRecord[] = [];
-  const keptVectors: Float32Array[] = [];
-
-  existingChunks.forEach((chunk, index) => {
-    if (idsToRemove.has(chunk.sourceId)) return;
-    keptChunks.push(chunk);
-    if (dimensions > 0) {
-      const start = index * dimensions;
-      keptVectors.push(existingEmbeddings.slice(start, start + dimensions));
-    }
-  });
-
-  await writeJsonLines(chunksPath, keptChunks);
-
-  const buffer = Buffer.alloc(keptVectors.length * dimensions * 4);
-  const view = new Float32Array(
-    buffer.buffer,
-    buffer.byteOffset,
-    keptVectors.length * dimensions,
-  );
-  let offset = 0;
-  for (const vector of keptVectors) {
-    view.set(vector, offset);
-    offset += dimensions;
-  }
-  await fs.writeFile(embeddingsPath, buffer);
+  const db = openIndexDb(indexDir);
+  deleteChunksBySource(db, sourceIds);
+  const chunkCount = getIndexChunkCount(db);
 
   await writeManifest(projectDir, {
     version: 1,
     updatedAt: nowIso(),
     embeddingModel: EMBEDDING_MODEL,
-    embeddingDimensions: dimensions || null,
+    embeddingDimensions: getIndexDimensions(db) ?? manifest.embeddingDimensions,
     sources: manifest.sources.filter((source) => !idsToRemove.has(source.id)),
     index: {
-      chunkCount: keptChunks.length,
-      embeddingCount: keptVectors.length,
+      chunkCount,
+      embeddingCount: chunkCount,
       generatedAt: nowIso(),
     },
   });
-
-  invalidateKbCache(indexDir);
 }
 
 export interface RejectedSourceFile {
@@ -1546,16 +1408,26 @@ export async function saveResearchNote(params: {
 export async function rebuildAiIndex(
   projectDir: string,
   sourceRecords?: AiSourceRecord[],
+  options?: {
+    /**
+     * true (default): drop extraction caches so every source is re-parsed
+     * with the best extractor now available — rebuild as upgrade path.
+     * false: reuse the existing caches and only re-chunk/re-embed — what
+     * the legacy-index migration wants (its caches are already current;
+     * re-running Docling on the whole corpus would just burn minutes).
+     */
+    reextract?: boolean;
+  },
 ): Promise<AiManifest> {
   const { indexDir } = await ensureAiWorkspace(projectDir);
-  const manifest = sourceRecords
-    ? await readManifest(projectDir)
-    : await readManifest(projectDir);
+  const manifest = await readManifest(projectDir);
   const sources = sourceRecords ?? manifest.sources;
+  const reextract = options?.reextract ?? true;
 
   const chunkRecords: AiChunkRecord[] = [];
   const chunkTexts: string[] = [];
   const metadataById = new Map<string, AiSourceMetadata>();
+  const digestById = new Map<string, AiSourceDigest | undefined>();
 
   for (const source of sources) {
     const sourcePath = path.join(
@@ -1572,14 +1444,14 @@ export async function rebuildAiIndex(
     );
     metadataById.set(source.id, metaOnly.metadata);
 
-    // Rebuild means re-extract: dropping the cache first makes rebuild the
-    // upgrade path for sources indexed before Docling was installed —
-    // they get re-extracted with the best extractor now available.
-    await removeExtractionCache(projectDir, source.id);
+    if (reextract) {
+      await removeExtractionCache(projectDir, source.id);
+    }
     const extracted = await getExtractedPages(projectDir, source);
+    digestById.set(source.id, buildSourceDigest(extracted.pages));
 
     for (const page of extracted.pages) {
-      const pageChunks = chunkText(page.text);
+      const pageChunks = chunkPageSections(page.text);
       for (const [index, chunk] of pageChunks.entries()) {
         const record: AiChunkRecord = {
           id: `${source.id}:${page.page ?? 0}:${index}`,
@@ -1588,31 +1460,36 @@ export async function rebuildAiIndex(
           page: page.page,
           charStart: chunk.charStart,
           charEnd: chunk.charEnd,
+          heading: chunk.heading,
           text: chunk.text,
         };
         chunkRecords.push(record);
-        chunkTexts.push(chunk.text);
+        chunkTexts.push(
+          chunk.heading ? `${chunk.heading} — ${chunk.text}` : chunk.text,
+        );
       }
     }
   }
 
-  const vectors = await embedTexts(chunkTexts);
-  const dimensions = await writeEmbeddingMatrix(
-    path.join(indexDir, EMBEDDINGS_FILE),
-    vectors,
-  );
+  const vectors = await embedTexts(chunkTexts, "passage");
 
-  await writeJsonLines(path.join(indexDir, CHUNKS_FILE), chunkRecords);
+  const db = openIndexDb(indexDir);
+  clearIndexDb(db);
+  insertChunks(
+    db,
+    chunkRecords.map((record, index) => ({ record, embedding: vectors[index] })),
+  );
 
   return {
     version: 1,
     updatedAt: nowIso(),
     embeddingModel: EMBEDDING_MODEL,
-    embeddingDimensions: dimensions || null,
+    embeddingDimensions: getIndexDimensions(db),
     sources: sources.map((source) => ({
       ...source,
       updatedAt: nowIso(),
       metadata: metadataById.get(source.id) ?? source.metadata,
+      digest: digestById.get(source.id) ?? source.digest,
     })),
     index: {
       chunkCount: chunkRecords.length,
@@ -1638,76 +1515,32 @@ export async function searchAiKnowledgeBase(
   sourceIds?: string[],
 ): Promise<AiSearchHit[]> {
   const manifest = await readManifest(projectDir);
-  if (!manifest.embeddingDimensions || manifest.index.chunkCount === 0) {
-    return [];
-  }
+  await migrateLegacyIndexIfNeeded(projectDir, manifest);
 
   const { indexDir } = await ensureAiWorkspace(projectDir);
-  const { chunkRecords, embeddingMatrix, bm25Index } = await getKbIndex(indexDir);
-
-  if (chunkRecords.length === 0 || embeddingMatrix.length === 0) {
-    return [];
-  }
+  const db = openIndexDb(indexDir);
+  if (getIndexChunkCount(db) === 0) return [];
 
   // An empty/undefined allowlist means "search everything" — a non-empty
   // one restricts scoring to those sources' chunks only, so a conversation
   // scoped to specific sources can't retrieve (and therefore can't cite)
-  // anything outside that scope. Previously this was advisory-only: the
-  // system prompt told the model which sources were "selected", but
-  // search_knowledge_base searched the whole corpus regardless.
-  const allowedSourceIds = sourceIds && sourceIds.length > 0 ? new Set(sourceIds) : null;
+  // anything outside that scope.
+  const allowedSourceIds =
+    sourceIds && sourceIds.length > 0 ? new Set(sourceIds) : null;
 
-  const chunkById = new Map<string, AiChunkRecord>();
-  for (const chunk of chunkRecords) chunkById.set(chunk.id, chunk);
+  const queryVector = (await embedTexts([query], "query"))[0] ?? null;
 
-  const dimensions = manifest.embeddingDimensions;
-  const queryVector = (await embedTexts([query]))[0];
-  if (!queryVector) return [];
-  const queryEmbedding = new Float32Array(queryVector);
-
-  const semanticScored: Array<{ id: string; score: number }> = [];
-  for (let index = 0; index < chunkRecords.length; index += 1) {
-    const chunk = chunkRecords[index];
-    if (allowedSourceIds && !allowedSourceIds.has(chunk.sourceId)) continue;
-
-    const start = index * dimensions;
-    const end = start + dimensions;
-    // subarray, not slice — a zero-copy view is all dotProduct needs (it only
-    // reads), and slice's per-chunk allocation+copy was the dominant cost of
-    // this loop at scale (40k chunks meant 40k allocations on every search).
-    const chunkEmbedding = embeddingMatrix.subarray(start, end);
-    semanticScored.push({ id: chunk.id, score: dotProduct(queryEmbedding, chunkEmbedding) });
-  }
-  semanticScored.sort((left, right) => right.score - left.score);
-
-  const lexicalScores = scoreBm25(bm25Index, tokenize(query));
-  const lexicalScored: Array<{ id: string; score: number }> = [];
-  for (const [id, score] of lexicalScores) {
-    const chunk = chunkById.get(id);
-    if (!chunk) continue;
-    if (allowedSourceIds && !allowedSourceIds.has(chunk.sourceId)) continue;
-    lexicalScored.push({ id, score });
-  }
-  lexicalScored.sort((left, right) => right.score - left.score);
-
-  const fused = reciprocalRankFusion([
-    semanticScored.map((s) => s.id),
-    lexicalScored.map((s) => s.id),
-  ]);
-
-  const fusedIds = [...fused.entries()]
-    .sort((left, right) => right[1] - left[1])
-    .slice(0, topK)
-    .map(([id]) => id);
-
+  const hits = searchHybrid(db, {
+    queryText: query,
+    queryEmbedding: queryVector,
+    topK,
+    allowedSourceIds,
+  });
   // Report the fused RRF score, not raw cosine similarity — it's what
   // actually determined this ordering, and a lexical-only hit (found by
-  // BM25 but never scored semantically) has no meaningful cosine score to
+  // FTS but never ranked semantically) has no meaningful cosine score to
   // fall back to.
-  return fusedIds.map((id) => ({
-    score: fused.get(id) ?? 0,
-    chunk: chunkById.get(id) as AiChunkRecord,
-  }));
+  return hits.map((hit) => ({ score: hit.score, chunk: hit.chunk }));
 }
 
 export async function getAiSourceRecord(

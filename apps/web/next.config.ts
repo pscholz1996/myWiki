@@ -13,6 +13,8 @@ const nextConfig: NextConfig = {
     "pdfjs-dist",
     "@huggingface/transformers",
     "@napi-rs/canvas",
+    "better-sqlite3",
+    "sqlite-vec",
   ],
 };
 

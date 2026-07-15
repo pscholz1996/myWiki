@@ -165,7 +165,7 @@ export async function POST(req: Request) {
     }
 
     const projectDir = getProjectDir();
-    const conversationId = MAIN_CONVERSATION_ID;
+    const conversationId = body.conversationId ?? MAIN_CONVERSATION_ID;
     const existing = await readAiConversation(projectDir, conversationId);
     // No prior turns means no SDK session has been established yet — see
     // the isNewSession/resume split in runMyWikiChatTurn.
@@ -181,6 +181,8 @@ export async function POST(req: Request) {
     conversation = {
       ...conversation,
       model: body.model ?? conversation.model,
+      // History list titles come from the opening question.
+      title: conversation.title ?? message.slice(0, 80),
       sourceIds: body.sourceIds ?? conversation.sourceIds,
       // Must be a real UUID, independent of conversation.id: the Claude
       // Agent SDK accepts any caller-chosen string for a brand-new session

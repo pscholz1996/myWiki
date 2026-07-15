@@ -1,7 +1,12 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { ensureAiWorkspace } from "@/lib/ai/knowledge-base";
-import type { AiConversation, AiMessage, AiUsage } from "@/lib/ai/types";
+import type {
+  AiConversation,
+  AiConversationSummary,
+  AiMessage,
+  AiUsage,
+} from "@/lib/ai/types";
 
 const CONVERSATIONS_DIR = [".mywiki", "ai", "conversations"] as const;
 
@@ -48,6 +53,41 @@ export async function deleteAiConversation(
 ): Promise<void> {
   const filePath = conversationFilePath(projectDir, conversationId);
   await fs.rm(filePath, { force: true });
+}
+
+/**
+ * Every conversation in the project, newest first — summaries only, since
+ * the history list never needs message bodies and a long-lived project can
+ * accumulate hundreds of conversations.
+ */
+export async function listAiConversations(
+  projectDir: string,
+): Promise<AiConversationSummary[]> {
+  const dir = await ensureConversationDir(projectDir);
+  const files = (await fs.readdir(dir)).filter((name) => name.endsWith(".json"));
+
+  const summaries: AiConversationSummary[] = [];
+  for (const file of files) {
+    try {
+      const raw = await fs.readFile(path.join(dir, file), "utf8");
+      const conversation = JSON.parse(raw) as AiConversation;
+      // Empty conversations (created but never used) are invisible in
+      // history — they'd read as clutter, and switching to one is
+      // indistinguishable from "new chat" anyway.
+      if (conversation.messages.length === 0) continue;
+      summaries.push({
+        id: conversation.id,
+        title:
+          conversation.title ??
+          conversation.messages.find((m) => m.role === "user")?.content.slice(0, 80),
+        updatedAt: conversation.updatedAt,
+        messageCount: conversation.messages.length,
+      });
+    } catch {
+      // A torn/corrupt conversation file shouldn't take down the whole list.
+    }
+  }
+  return summaries.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
 export async function createAiConversation(params: {

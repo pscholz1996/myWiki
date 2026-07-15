@@ -70,6 +70,7 @@ import {
   heuristicTitleFromText,
   saveResearchNote,
   updateAiSourceMetadata,
+  deleteAiSource,
   deleteAiSources,
   type AiManifest,
   type AiSourceRecord,
@@ -381,7 +382,7 @@ describe("searchAiKnowledgeBase — scoring and cache freshness", () => {
 });
 
 describe("appendSourcesToIndex — incremental writes", () => {
-  test("two incremental uploads produce index files identical to a full rebuild", async () => {
+  test("two incremental uploads search identically to a full rebuild", async () => {
     await uploadAiSources(projectDir, [
       textFile("alpha.txt", "Alpha paper about quantum entanglement and nonlocal correlations."),
     ]);
@@ -389,12 +390,8 @@ describe("appendSourcesToIndex — incremental writes", () => {
       textFile("beta.txt", "Beta paper about neural network pruning techniques."),
     ]);
 
-    const { indexDir } = await ensureAiWorkspace(projectDir);
-    const chunksPath = path.join(indexDir, "chunks.jsonl");
-    const embeddingsPath = path.join(indexDir, "embeddings.bin");
-
-    const appendedChunks = fs.readFileSync(chunksPath, "utf8");
-    const appendedEmbeddings = fs.readFileSync(embeddingsPath);
+    const incrementalAlpha = await searchAiKnowledgeBase(projectDir, "quantum entanglement", 3);
+    const incrementalBeta = await searchAiKnowledgeBase(projectDir, "neural network pruning", 3);
 
     // Rebuild from scratch using only the two sources actually appended above
     // (the shared fixture's SOURCE was registered in the manifest but never
@@ -403,39 +400,33 @@ describe("appendSourcesToIndex — incremental writes", () => {
     const uploaded = manifest.sources.filter((source) => source.id !== SOURCE.id);
     await rebuildAiIndex(projectDir, uploaded);
 
-    expect(fs.readFileSync(chunksPath, "utf8")).toBe(appendedChunks);
-    expect(fs.readFileSync(embeddingsPath).equals(appendedEmbeddings)).toBe(true);
-  });
-});
+    const rebuiltAlpha = await searchAiKnowledgeBase(projectDir, "quantum entanglement", 3);
+    const rebuiltBeta = await searchAiKnowledgeBase(projectDir, "neural network pruning", 3);
 
-describe("appendSourcesToIndex — corruption guard", () => {
-  test("refuses to append onto a truncated embeddings.bin", async () => {
-    await uploadAiSources(projectDir, [
-      textFile("alpha.txt", "Alpha paper about quantum entanglement."),
-    ]);
-
-    const { indexDir } = await ensureAiWorkspace(projectDir);
-    const embeddingsPath = path.join(indexDir, "embeddings.bin");
-    const original = fs.readFileSync(embeddingsPath);
-    fs.writeFileSync(embeddingsPath, original.subarray(0, original.length - 1));
-
-    await expect(
-      uploadAiSources(projectDir, [textFile("beta.txt", "Beta paper about neural networks.")]),
-    ).rejects.toThrow(/corrupted/);
+    expect(rebuiltAlpha.map((h) => h.chunk.id)).toEqual(
+      incrementalAlpha.map((h) => h.chunk.id),
+    );
+    expect(rebuiltBeta.map((h) => h.chunk.id)).toEqual(
+      incrementalBeta.map((h) => h.chunk.id),
+    );
+    expect(rebuiltAlpha[0]?.chunk.text).toContain("quantum entanglement");
   });
 
-  test("refuses to append onto a chunks.jsonl missing its trailing newline", async () => {
+  test("deleting a source removes its chunks from search", async () => {
     await uploadAiSources(projectDir, [
       textFile("alpha.txt", "Alpha paper about quantum entanglement."),
+      textFile("beta.txt", "Beta paper about neural network pruning."),
     ]);
+    const manifest = await listAiSources(projectDir);
+    const alpha = manifest.sources.find((s) => s.originalName === "alpha.txt");
+    expect(alpha).toBeDefined();
 
-    const { indexDir } = await ensureAiWorkspace(projectDir);
-    const chunksPath = path.join(indexDir, "chunks.jsonl");
-    fs.writeFileSync(chunksPath, fs.readFileSync(chunksPath, "utf8").trimEnd());
+    await deleteAiSource(projectDir, alpha!.id);
 
-    await expect(
-      uploadAiSources(projectDir, [textFile("beta.txt", "Beta paper about neural networks.")]),
-    ).rejects.toThrow(/corrupted/);
+    const hits = await searchAiKnowledgeBase(projectDir, "quantum entanglement", 5);
+    expect(hits.every((h) => h.chunk.sourceId !== alpha!.id)).toBe(true);
+    const betaHits = await searchAiKnowledgeBase(projectDir, "neural network pruning", 5);
+    expect(betaHits.length).toBeGreaterThan(0);
   });
 });
 

@@ -32,11 +32,14 @@ export interface AiSource {
   ingestedAt?: string;
 }
 
-// There is exactly one conversation per project — see MAIN_CONVERSATION_ID
-// below — so a conversation is identified by this constant, never by a
-// user-visible id/title the way a multi-conversation UI would need.
 export interface AiConversation {
   id: string;
+  /**
+   * Display title, set from the first user message. Absent on the legacy
+   * single conversation ("main") and on conversations that haven't had a
+   * first message yet.
+   */
+  title?: string;
   model: string;
   sdkSessionId?: string;
   messages: AiMessage[];
@@ -61,11 +64,18 @@ export interface AiConversation {
 // fallback that's accurate as long as the app keeps defaulting to Sonnet 5.
 export const DEFAULT_CONTEXT_WINDOW_TOKENS = 1_000_000;
 
-// The whole app works one project at a time and the user works one
-// project in one continuing conversation — no picker, no list, just this
-// single fixed id under which the conversation (and its underlying Claude
-// Agent SDK session) persists and resumes indefinitely.
+// The id of the legacy single conversation, kept as the fallback when a
+// chat request names no conversation — pre-multi-conversation clients and
+// existing on-disk conversations keep working unchanged.
 export const MAIN_CONVERSATION_ID = "main";
+
+/** What the conversation-history list shows — everything but the messages. */
+export interface AiConversationSummary {
+  id: string;
+  title?: string;
+  updatedAt: string;
+  messageCount: number;
+}
 
 export type AiSourceKind = "pdf" | "pptx" | "markdown" | "text" | "note";
 
@@ -134,6 +144,15 @@ export interface AiSourceRecord {
    * notes (never uploaded bytes to hash).
    */
   contentHash?: string;
+  /**
+   * Deterministic ingest-time digest: opening of page 1 (usually the
+   * abstract) and the section outline with page numbers. Lets the agent
+   * plan retrieval per source instead of searching blind.
+   */
+  digest?: {
+    abstract?: string;
+    outline?: Array<{ page: number | null; heading: string }>;
+  };
 }
 
 export interface AiManifest {
@@ -202,6 +221,8 @@ export type AiUploadProgressCallback = (event: AiUploadProgressEvent) => void;
 
 export interface AiChatRequest {
   message: string;
+  /** Target conversation; omitted = the legacy MAIN_CONVERSATION_ID. */
+  conversationId?: string;
   sourceIds?: string[];
   model?: string;
 }

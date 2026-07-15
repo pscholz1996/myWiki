@@ -10,51 +10,38 @@ import { MAIN_CONVERSATION_ID } from "@/lib/ai/types";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-// There's exactly one conversation per project (see MAIN_CONVERSATION_ID),
-// so this route is singular and unparameterized — no id to pick between.
+function errorResponse(error: unknown) {
+  if (error instanceof NoProjectSelectedError) {
+    return NextResponse.json({ error: "no-project-selected" }, { status: 409 });
+  }
+  const message = error instanceof Error ? error.message : "Unknown error";
+  return NextResponse.json({ error: message }, { status: 500 });
+}
 
-export async function GET() {
+// One conversation by id; no id falls back to the legacy single
+// conversation so pre-multi-conversation clients keep working.
+export async function GET(req: Request) {
   try {
     const projectDir = getProjectDir();
-    const conversation = await readAiConversation(
-      projectDir,
-      MAIN_CONVERSATION_ID,
-    );
+    const id = new URL(req.url).searchParams.get("id") ?? MAIN_CONVERSATION_ID;
+    const conversation = await readAiConversation(projectDir, id);
     return NextResponse.json({ conversation });
   } catch (error) {
-    if (error instanceof NoProjectSelectedError) {
-      return NextResponse.json(
-        { error: "no-project-selected" },
-        { status: 409 },
-      );
-    }
-    const message = error instanceof Error ? error.message : "Unknown error";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return errorResponse(error);
   }
 }
 
-// Clears the conversation so the next message starts a fresh Claude Agent
-// SDK session — the whole point of a single continuing conversation is
-// that it always resumes, so "start over" has to be an explicit action
-// rather than something that happens by switching to a new one.
-export async function DELETE() {
+export async function DELETE(req: Request) {
   try {
     const projectDir = getProjectDir();
-    // Must close the live SDK session together with deleting the conversation
-    // file — otherwise the next message would reuse an in-process session
-    // still tied to the just-deleted sdkSessionId instead of genuinely
-    // starting over.
-    closeLiveSession(projectDir);
-    await deleteAiConversation(projectDir, MAIN_CONVERSATION_ID);
+    const id = new URL(req.url).searchParams.get("id") ?? MAIN_CONVERSATION_ID;
+    // Must close the live SDK session together with deleting the
+    // conversation file — otherwise a next message under the same id would
+    // reuse an in-process session tied to the just-deleted sdkSessionId.
+    closeLiveSession(projectDir, id);
+    await deleteAiConversation(projectDir, id);
     return NextResponse.json({ ok: true });
   } catch (error) {
-    if (error instanceof NoProjectSelectedError) {
-      return NextResponse.json(
-        { error: "no-project-selected" },
-        { status: 409 },
-      );
-    }
-    const message = error instanceof Error ? error.message : "Unknown error";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return errorResponse(error);
   }
 }

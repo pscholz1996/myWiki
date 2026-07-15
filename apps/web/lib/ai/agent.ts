@@ -165,9 +165,11 @@ export function createMyWikiMcpServer(
       ),
       tool(
         "browse_knowledge_base",
-        "List every source and research note as a lightweight table of contents (title, kind, authors, year) without touching chunk/embedding data. Use this before searching, to see what's already available (including notes you saved in earlier turns) so you know which angles to search for.",
+        "List sources and research notes as a table of contents: title, kind, authors, year, plus a per-source digest (abstract snippet and section outline with page numbers). Use this to PLAN retrieval — the outline tells you which source and page range covers a topic, often better than a blind search. Pass detail: 'full' for complete abstracts and outlines, source_id to inspect a single source's digest in depth.",
         {
           kind: z.enum(["pdf", "pptx", "markdown", "text", "note"]).optional(),
+          source_id: z.string().optional(),
+          detail: z.enum(["compact", "full"]).optional(),
         },
         async (args) => {
           try {
@@ -176,9 +178,11 @@ export function createMyWikiMcpServer(
               scopedSourceIds && scopedSourceIds.length > 0
                 ? new Set(scopedSourceIds)
                 : null;
+            const full = args.detail === "full" || Boolean(args.source_id);
             const entries = manifest.sources
               .filter((source) => !scoped || scoped.has(source.id))
               .filter((source) => !args.kind || source.kind === args.kind)
+              .filter((source) => !args.source_id || source.id === args.source_id)
               .map((source) => ({
                 id: source.id,
                 kind: source.kind,
@@ -188,7 +192,16 @@ export function createMyWikiMcpServer(
                     : (source.metadata?.title ?? source.originalName),
                 authors: source.metadata?.authors,
                 year: source.metadata?.year,
+                pageCount: source.pageCount,
                 bibKey: source.bibKey,
+                abstract: full
+                  ? source.digest?.abstract
+                  : source.digest?.abstract?.slice(0, 180),
+                outline: full
+                  ? source.digest?.outline
+                  : source.digest?.outline
+                      ?.slice(0, 8)
+                      .map((entry) => entry.heading),
               }));
             return normalizeToolResult({ sources: entries });
           } catch (error) {
@@ -775,15 +788,37 @@ const liveSessions =
   globalForSessions.__mywikiLiveSessions ?? new Map<string, LiveSession>();
 globalForSessions.__mywikiLiveSessions = liveSessions;
 
-export function closeLiveSession(projectDir: string): void {
-  liveSessions.get(projectDir)?.close();
-  liveSessions.delete(projectDir);
+function sessionKey(projectDir: string, conversationId: string): string {
+  return `${projectDir}::${conversationId}`;
+}
+
+/**
+ * Close the live SDK session for one conversation, or (with no
+ * conversationId) every session under the project — the latter is what
+ * switching the knowledge folder needs.
+ */
+export function closeLiveSession(
+  projectDir: string,
+  conversationId?: string,
+): void {
+  const prefix = `${projectDir}::`;
+  for (const [key, session] of liveSessions) {
+    if (conversationId ? key === sessionKey(projectDir, conversationId) : key.startsWith(prefix)) {
+      session.close();
+      liveSessions.delete(key);
+    }
+  }
 }
 
 export async function getPlanUsage(
   projectDir: string,
 ): Promise<SDKControlGetUsageResponse | null> {
-  const session = liveSessions.get(projectDir);
+  // Any live session under this project can answer the plan-usage query —
+  // usage is account-level, not conversation-level.
+  const prefix = `${projectDir}::`;
+  const session = [...liveSessions.entries()].find(([key]) =>
+    key.startsWith(prefix),
+  )?.[1];
   if (!session) return null;
   try {
     return await session.usage();
@@ -806,8 +841,14 @@ export async function* runMyWikiChatTurn(
   const sdkSessionId = conversation.sdkSessionId ?? conversation.id;
   const model = request.model ?? conversation.model ?? "claude-sonnet-5";
 
-  let session = liveSessions.get(projectDir);
+  const key = sessionKey(projectDir, conversation.id);
+  let session = liveSessions.get(key);
   if (!session) {
+    // One CLI subprocess per live conversation would accumulate as the
+    // user switches around their history — close the project's other
+    // sessions first. Switching back re-resumes from sdkSessionId, so
+    // nothing is lost except a warm process.
+    closeLiveSession(projectDir);
     session = new LiveSession({
       cwd: projectDir,
       sourceIds: conversation.sourceIds,
@@ -815,7 +856,7 @@ export async function* runMyWikiChatTurn(
       isNewSession,
       sdkSessionId,
     });
-    liveSessions.set(projectDir, session);
+    liveSessions.set(key, session);
   } else {
     await session.rescopeSources(projectDir, conversation.sourceIds);
   }

@@ -2,6 +2,7 @@ import type {
   AiChatRequest,
   AiChatStreamEvent,
   AiConversation,
+  AiConversationSummary,
   AiManifest,
   AiPlanUsage,
   AiRejectedSourceFile,
@@ -148,18 +149,56 @@ export async function updateAiSourceMetadata(
   return res.json() as Promise<AiSourceRecord>;
 }
 
-// There's exactly one conversation per project — no id to pick between.
-export async function fetchAiConversation(): Promise<AiConversation | null> {
-  const res = await fetch("/api/ai/conversation", { cache: "no-store" });
+export async function fetchAiConversation(
+  conversationId?: string,
+): Promise<AiConversation | null> {
+  const query = conversationId ? `?id=${encodeURIComponent(conversationId)}` : "";
+  const res = await fetch(`/api/ai/conversation${query}`, { cache: "no-store" });
   if (!res.ok) throw await errFrom(res);
   const data = (await res.json()) as { conversation: AiConversation | null };
   return data.conversation;
 }
 
-export async function clearAiConversation(): Promise<{ ok: boolean }> {
-  const res = await fetch("/api/ai/conversation", { method: "DELETE" });
+export async function deleteConversation(
+  conversationId?: string,
+): Promise<{ ok: boolean }> {
+  const query = conversationId ? `?id=${encodeURIComponent(conversationId)}` : "";
+  const res = await fetch(`/api/ai/conversation${query}`, { method: "DELETE" });
   if (!res.ok) throw await errFrom(res);
   return res.json() as Promise<{ ok: boolean }>;
+}
+
+export async function fetchConversationList(): Promise<AiConversationSummary[]> {
+  const data = await getJson<{ conversations: AiConversationSummary[] }>(
+    "/api/ai/conversations",
+  );
+  return data.conversations;
+}
+
+export async function createConversation(): Promise<AiConversation> {
+  const res = await fetch("/api/ai/conversations", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: "{}",
+  });
+  if (!res.ok) throw await errFrom(res);
+  const data = (await res.json()) as { conversation: AiConversation };
+  return data.conversation;
+}
+
+export async function saveAnswerAsNote(params: {
+  title: string;
+  content: string;
+  drawsOnSourceIds?: string[];
+}): Promise<AiSourceRecord> {
+  const res = await fetch("/api/ai/notes", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) throw await errFrom(res);
+  const data = (await res.json()) as { note: AiSourceRecord };
+  return data.note;
 }
 
 export async function streamAiChat(
