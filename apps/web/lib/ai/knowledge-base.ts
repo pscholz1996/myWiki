@@ -854,6 +854,119 @@ export async function listAiSources(projectDir: string): Promise<AiManifest> {
   return readManifest(projectDir);
 }
 
+/**
+ * Extraction cache: `.mywiki/ai/extracted/<sourceId>.json` stores the exact
+ * page texts a source was indexed from. It exists for two reasons:
+ *
+ * 1. Consistency — cite() and read_source_page must see the SAME text the
+ *    chunks were built from. With two extractors in play (Docling vs the
+ *    built-in fallbacks), re-extracting on every read could verify a quote
+ *    against different text than the model actually searched.
+ * 2. Cost — Docling takes seconds-to-minutes per document; re-running it on
+ *    every page read or citation check is a non-starter (and even pdfjs
+ *    re-parsing a 500-page norm per cite() was wasteful).
+ */
+interface ExtractionCacheEntry {
+  extractor: "docling" | "builtin";
+  pageCount: number | null;
+  pages: Array<{ page: number | null; text: string }>;
+}
+
+function extractionCachePath(projectDir: string, sourceId: string): string {
+  return path.join(projectDir, ".mywiki", "ai", "extracted", `${sourceId}.json`);
+}
+
+async function readExtractionCache(
+  projectDir: string,
+  sourceId: string,
+): Promise<ExtractionCacheEntry | null> {
+  try {
+    const raw = await fs.readFile(extractionCachePath(projectDir, sourceId), "utf8");
+    const parsed = JSON.parse(raw) as ExtractionCacheEntry;
+    return Array.isArray(parsed.pages) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+async function writeExtractionCache(
+  projectDir: string,
+  sourceId: string,
+  entry: ExtractionCacheEntry,
+): Promise<void> {
+  const cachePath = extractionCachePath(projectDir, sourceId);
+  await fs.mkdir(path.dirname(cachePath), { recursive: true });
+  await fs.writeFile(cachePath, JSON.stringify(entry), "utf8");
+}
+
+async function removeExtractionCache(
+  projectDir: string,
+  sourceId: string,
+): Promise<void> {
+  await fs.rm(extractionCachePath(projectDir, sourceId), { force: true });
+}
+
+/**
+ * The one place that decides what text a source consists of: cache first,
+ * then Docling (PDFs only — its layout model is where the quality win
+ * lives), then the built-in extractors. Every caller — indexing, page
+ * reads, citation verification — goes through here, so they can never
+ * disagree about a source's text.
+ */
+async function getExtractedPages(
+  projectDir: string,
+  source: AiSourceRecord,
+): Promise<ExtractionCacheEntry> {
+  const cached = await readExtractionCache(projectDir, source.id);
+  if (cached) return cached;
+
+  const sourcePath = path.join(
+    projectDir,
+    ".mywiki",
+    "ai",
+    "sources",
+    source.storedName,
+  );
+
+  let entry: ExtractionCacheEntry | null = null;
+  if (source.kind === "pdf") {
+    try {
+      const { convertWithDocling } = await import("@/lib/ai/docling");
+      const docling = await convertWithDocling(sourcePath);
+      if (docling && docling.pages.length > 0) {
+        entry = {
+          extractor: "docling",
+          pageCount: docling.pageCount,
+          pages: docling.pages,
+        };
+      }
+    } catch (error) {
+      // Docling being installed-but-broken (or choking on one file) must
+      // never block ingestion — fall back and note why in the server log.
+      console.warn(
+        `Docling conversion failed for ${source.originalName}; falling back to built-in extraction:`,
+        error instanceof Error ? error.message : error,
+      );
+    }
+  }
+
+  if (!entry) {
+    const bytes = await fs.readFile(sourcePath);
+    const extracted = await extractSourceText(
+      source.originalName,
+      new Uint8Array(bytes),
+    );
+    entry = {
+      extractor: "builtin",
+      pageCount: extracted.pageCount,
+      pages: extracted.pages,
+    };
+  }
+
+  await writeExtractionCache(projectDir, source.id, entry);
+  return entry;
+}
+
 async function extractAndChunkSource(
   projectDir: string,
   source: AiSourceRecord,
@@ -871,15 +984,19 @@ async function extractAndChunkSource(
     source.storedName,
   );
   const bytes = await fs.readFile(sourcePath);
+  // Metadata always comes from the built-in extractor (pdf dictionary +
+  // page-1 layout heuristics live there); page TEXT preferentially comes
+  // from Docling via getExtractedPages below.
   const extracted = await extractSourceText(
     source.originalName,
     new Uint8Array(bytes),
   );
+  const { pages, pageCount } = await getExtractedPages(projectDir, source);
 
   const records: AiChunkRecord[] = [];
   const texts: string[] = [];
 
-  for (const page of extracted.pages) {
+  for (const page of pages) {
     const pageChunks = chunkText(page.text);
     for (const [index, chunk] of pageChunks.entries()) {
       records.push({
@@ -898,7 +1015,7 @@ async function extractAndChunkSource(
   return {
     records,
     texts,
-    pageCount: extracted.pageCount,
+    pageCount,
     metadata: extracted.metadata,
   };
 }
@@ -1328,9 +1445,10 @@ export async function deleteAiSources(
   }
 
   await Promise.all(
-    removed.map((source) =>
+    removed.flatMap((source) => [
       fs.rm(path.join(sourcesDir, source.storedName), { force: true }),
-    ),
+      removeExtractionCache(projectDir, source.id),
+    ]),
   );
   await removeSourcesFromIndex(
     projectDir,
@@ -1404,6 +1522,10 @@ export async function saveResearchNote(params: {
 
   if (existing) {
     await removeSourcesFromIndex(params.projectDir, [id]);
+    // The note's content just changed on disk — a cached extraction from
+    // the previous version would silently win over the new text in
+    // getExtractedPages, so it must go before re-indexing.
+    await removeExtractionCache(params.projectDir, id);
   }
   await appendSourcesToIndex(params.projectDir, [record]);
 
@@ -1433,11 +1555,17 @@ export async function rebuildAiIndex(
       source.storedName,
     );
     const bytes = await fs.readFile(sourcePath);
-    const extracted = await extractSourceText(
+    const metaOnly = await extractSourceText(
       source.originalName,
       new Uint8Array(bytes),
     );
-    metadataById.set(source.id, extracted.metadata);
+    metadataById.set(source.id, metaOnly.metadata);
+
+    // Rebuild means re-extract: dropping the cache first makes rebuild the
+    // upgrade path for sources indexed before Docling was installed —
+    // they get re-extracted with the best extractor now available.
+    await removeExtractionCache(projectDir, source.id);
+    const extracted = await getExtractedPages(projectDir, source);
 
     for (const page of extracted.pages) {
       const pageChunks = chunkText(page.text);
@@ -1650,15 +1778,7 @@ export async function readAiSourcePage(
     throw new Error("Source not found");
   }
 
-  const sourcePath = path.join(
-    projectDir,
-    ".mywiki",
-    "ai",
-    "sources",
-    source.storedName,
-  );
-  const bytes = new Uint8Array(await fs.readFile(sourcePath));
-  const extracted = await extractSourceText(source.originalName, bytes);
+  const extracted = await getExtractedPages(projectDir, source);
   const currentPage = extracted.pages.find((entry) => entry.page === page);
 
   if (!currentPage) {
@@ -1681,15 +1801,7 @@ export async function readAiSourceFull(
     throw new Error("Source not found");
   }
 
-  const sourcePath = path.join(
-    projectDir,
-    ".mywiki",
-    "ai",
-    "sources",
-    source.storedName,
-  );
-  const bytes = new Uint8Array(await fs.readFile(sourcePath));
-  const extracted = await extractSourceText(source.originalName, bytes);
+  const extracted = await getExtractedPages(projectDir, source);
   return {
     source,
     text: extracted.pages

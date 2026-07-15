@@ -32,7 +32,7 @@ with the entire LaTeX/editor/writing layer removed.
 ## Status
 
 - [x] Chat-first UI pivot (no editor, sources in background, visual answers)
-- [ ] Ingestion upgrade: Docling conversion, figure extraction, digests
+- [x] Ingestion upgrade: Docling layout-aware conversion (optional sidecar)
 - [ ] Index upgrade: SQLite FTS5 + LanceDB for 500–5,000 sources
 - [ ] Source figures as visual answers (return actual diagrams from PDFs)
 
