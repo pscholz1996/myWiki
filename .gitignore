@@ -35,3 +35,7 @@ yarn-error.log*
 # Misc
 .DS_Store
 *.pem
+
+# Docling sidecar venv (local, ~1.3GB — recreate with tools/docling/setup.sh)
+tools/docling/.venv
+
