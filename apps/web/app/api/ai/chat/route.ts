@@ -7,7 +7,7 @@ import {
   readAiConversation,
   updateAiConversation,
 } from "@/lib/ai/conversations";
-import { runOpenLatexChatTurn } from "@/lib/ai/agent";
+import { runMyWikiChatTurn } from "@/lib/ai/agent";
 import type {
   AiChatRequest,
   AiCitation,
@@ -98,7 +98,7 @@ function friendlySdkError(code: string | undefined | null): string | undefined {
 }
 
 /**
- * Track pending mcp__openlatex__cite tool calls by tool_use id, then
+ * Track pending mcp__mywiki__cite tool calls by tool_use id, then
  * confirm them as citations only once their tool_result comes back
  * verified. A cite() call that fails verification (quote not found on the
  * page) must never surface to the user as a citation.
@@ -115,7 +115,7 @@ function collectCitation(
     for (const block of blocks) {
       if (
         block?.type === "tool_use" &&
-        block.name === "mcp__openlatex__cite" &&
+        block.name === "mcp__mywiki__cite" &&
         block.input &&
         typeof block.input.sourceId === "string" &&
         typeof block.input.page === "number" &&
@@ -168,7 +168,7 @@ export async function POST(req: Request) {
     const conversationId = MAIN_CONVERSATION_ID;
     const existing = await readAiConversation(projectDir, conversationId);
     // No prior turns means no SDK session has been established yet — see
-    // the isNewSession/resume split in runOpenLatexChatTurn.
+    // the isNewSession/resume split in runMyWikiChatTurn.
     const isNewSession = !existing || existing.messages.length === 0;
     let conversation: AiConversation =
       existing ??
@@ -257,7 +257,7 @@ export async function POST(req: Request) {
         };
 
         try {
-          for await (const sdkMessage of runOpenLatexChatTurn(
+          for await (const sdkMessage of runMyWikiChatTurn(
             projectDir,
             conversation,
             body,

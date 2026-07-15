@@ -60,7 +60,8 @@ export function WelcomeScreen({ recent }: WelcomeScreenProps) {
           <div className="space-y-1">
             <h1 className="font-semibold text-2xl">myWiki</h1>
             <p className="text-muted-foreground text-sm">
-              Open the folder that contains your wiki to get started.
+              Choose the folder where your knowledge base lives (or should
+              live) — sources and index are stored there, chat happens here.
             </p>
           </div>
 
@@ -104,13 +105,13 @@ export function WelcomeScreen({ recent }: WelcomeScreenProps) {
             onClick={() => setNewProjectOpen(true)}
             disabled={submitting}
           >
-            <FolderPlusIcon className="size-4" /> New project
+            <FolderPlusIcon className="size-4" /> New knowledge folder
           </Button>
 
           {recent.length > 0 && (
             <div className="space-y-2">
               <h2 className="font-medium text-muted-foreground text-sm">
-                Recent projects
+                Recent folders
               </h2>
               <ul className="divide-y rounded-md border">
                 {recent.map((p) => (

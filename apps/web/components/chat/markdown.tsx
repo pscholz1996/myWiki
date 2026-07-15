@@ -1,10 +1,12 @@
 "use client";
 
+import type { ComponentProps } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeKatex from "rehype-katex";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import "katex/dist/katex.min.css";
+import { MermaidBlock } from "./mermaid-block";
 
 const WRAPPER_CLASS = [
   "text-sm leading-6",
@@ -27,12 +29,36 @@ const WRAPPER_CLASS = [
   "[&_.katex-display]:overflow-x-auto [&_.katex-display]:overflow-y-hidden [&_.katex-display]:py-1",
 ].join(" ");
 
+// ```mermaid fences become live diagrams; every other code block renders
+// normally. react-markdown wraps code blocks as <pre><code>, so the switch
+// happens at the <pre> level to replace the whole block, not just its text.
+function PreBlock(props: ComponentProps<"pre">) {
+  const child = Array.isArray(props.children)
+    ? props.children[0]
+    : props.children;
+  if (
+    child &&
+    typeof child === "object" &&
+    "props" in child &&
+    /\blanguage-mermaid\b/.test(
+      (child.props as { className?: string }).className ?? "",
+    )
+  ) {
+    const code = (child.props as { children?: unknown }).children;
+    if (typeof code === "string") {
+      return <MermaidBlock code={code} />;
+    }
+  }
+  return <pre {...props} />;
+}
+
 export function AiMarkdown({ content }: { content: string }) {
   return (
     <div className={WRAPPER_CLASS}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
         rehypePlugins={[rehypeKatex]}
+        components={{ pre: PreBlock }}
       >
         {content}
       </ReactMarkdown>

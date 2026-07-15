@@ -1,6 +1,6 @@
 "use client";
 
-import { WorkspaceLayout } from "@/components/workspace/workspace-layout";
+import { ChatApp } from "@/components/chat/chat-app";
 import { WelcomeScreen } from "@/components/project/welcome-screen";
 import { useCurrentProject } from "@/hooks/use-current-project";
 
@@ -33,7 +33,7 @@ export default function Home() {
 
   return (
     <main className="h-full">
-      <WorkspaceLayout current={current} recent={recent} />
+      <ChatApp current={current} />
     </main>
   );
 }

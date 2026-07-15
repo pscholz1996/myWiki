@@ -64,7 +64,7 @@ export function NewProjectDialog({ open, onClose }: Props) {
       succeeded = true;
     } catch (error) {
       toast.error(
-        error instanceof Error ? error.message : "Failed to create project",
+        error instanceof Error ? error.message : "Failed to create folder",
       );
     } finally {
       if (!succeeded) setSubmitting(false);
@@ -84,7 +84,7 @@ export function NewProjectDialog({ open, onClose }: Props) {
       >
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>New project</DialogTitle>
+            <DialogTitle>New knowledge folder</DialogTitle>
             <DialogDescription>
               Creates a new folder with a blank main.tex file, ready to write in.
             </DialogDescription>
@@ -96,7 +96,7 @@ export function NewProjectDialog({ open, onClose }: Props) {
                 htmlFor="new-project-name"
                 className="font-medium text-sm"
               >
-                Project name
+                Folder name
               </label>
               <Input
                 id="new-project-name"

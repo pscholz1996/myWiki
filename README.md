@@ -1,42 +1,47 @@
 # myWiki
 
-A local, AI-driven knowledge wiki for systems engineering and AI research. All
-knowledge stays on your own disk as plain files; Claude works on top of it as a
-research assistant that searches your sources, answers with verified page-level
-citations, and distills knowledge into living wiki pages.
+A local, AI-driven knowledge system for systems engineering and AI research —
+a very specialized Claude over your own library. The main page is a single
+chat window: ask a question, and Claude answers from your sources (papers,
+books, norms, slides) plus clearly-marked general knowledge, choosing the
+best form for the answer — prose, tables, LaTeX equations, or rendered
+Mermaid diagrams.
+
+Knowledge management stays in the background: a Sources dialog handles
+add/remove/metadata, and everything (source copies, index, conversation) is
+stored as plain files in a local knowledge folder you choose.
 
 Built on the foundation of [OpenLatex](https://github.com/pscholz1996/OpenLatex)
-(UI shell, filesystem sync, git integration, Claude Agent SDK integration,
-citation-verified knowledge base).
+(Claude Agent SDK integration, citation-verified knowledge base, UI stack) —
+with the entire LaTeX/editor/writing layer removed.
 
-## Concept
+## What it does
 
-- **Sources** (`sources/`) — drop PDFs, PPTX, and other originals here.
-- **Library** (`library/`) — ingested, searchable markdown conversions with
-  extracted figures, metadata, and AI digests.
-- **Wiki** (`wiki/`) — living markdown pages with `[[wikilinks]]`, written by
-  you and proposed/updated by the AI with citations back to sources.
-- **AI panel** — agentic Q&A over the whole knowledge base: hybrid search,
-  targeted deep reads, quote verification, text or visual answers.
+- **Chat-first UI** — a clean, Claude-like page; no editor, no projects.
+- **Grounded answers** — hybrid semantic + keyword search over your indexed
+  sources; broad multi-angle retrieval before synthesizing.
+- **Visible knowledge boundary** — parts answered from general knowledge are
+  explicitly marked; source-backed claims can carry verified, clickable
+  source chips (source + page, opens the PDF).
+- **Visual answers** — GFM tables, KaTeX math, and Mermaid diagrams rendered
+  inline whenever a picture beats a paragraph.
+- **Background source management** — upload PDFs/markdown/text, automatic
+  metadata lookup (CrossRef), search/sort/fix metadata, scope chat to
+  selected sources.
 
 ## Status
 
-Under active development:
-
-- [x] Phase 0 — OpenLatex fork stripped of LaTeX, rebranded, markdown editor +
-  source PDF viewer
-- [ ] Phase 1 — ingestion pipeline (Docling/markitdown) + hybrid index
-  (SQLite FTS5 + LanceDB)
-- [ ] Phase 2 — agentic Q&A with retrieval tools and citation chips
-- [ ] Phase 3 — living wiki pages (spaces, backlinks, AI page proposals)
-- [ ] Phase 4 — visual answers (Mermaid, SVG, source figures)
+- [x] Chat-first UI pivot (no editor, sources in background, visual answers)
+- [ ] Ingestion upgrade: Docling conversion, figure extraction, digests
+- [ ] Index upgrade: SQLite FTS5 + LanceDB for 500–5,000 sources
+- [ ] Source figures as visual answers (return actual diagrams from PDFs)
 
 ## Development
 
 ```bash
 pnpm install
-pnpm dev        # starts the web app on http://localhost:3000
+pnpm dev        # web app on http://localhost:3000
 ```
 
-Requires Node 20+ and pnpm. Sign in with your Claude account from the sidebar
-to enable the AI assistant.
+Requires Node 20+ and pnpm. Sign in with your Claude account from the header
+to enable the assistant.

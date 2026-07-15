@@ -6,18 +6,8 @@ import { readCurrentProject, setCurrentProject } from "@/lib/project/config";
 
 export const dynamic = "force-dynamic";
 
-// New wikis start with the canonical folder layout plus a Home page, so the
-// app has something to open and the structure documents itself.
-const HOME_MD = `# Home
-
-Welcome to your wiki.
-
-- Drop PDFs, slides, and other sources into \`sources/\` to ingest them.
-- Ingested, searchable copies live in \`library/\`.
-- Wiki pages live in \`wiki/\` — link between them with [[wikilinks]].
-`;
-
-const WIKI_DIRS = ["sources", "library", "wiki"] as const;
+// A knowledge folder starts empty — the app fills .mywiki/ with the index
+// and copied sources on first upload; there is nothing to scaffold.
 
 export async function POST(req: Request) {
   let body: { parentPath?: unknown; name?: unknown };
@@ -108,11 +98,6 @@ export async function POST(req: Request) {
     } else {
       await fs.mkdir(projectPath, { recursive: true });
     }
-
-    for (const dir of WIKI_DIRS) {
-      await fs.mkdir(path.join(projectPath, dir), { recursive: true });
-    }
-    await fs.writeFile(path.join(projectPath, "Home.md"), HOME_MD, "utf8");
 
     setCurrentProject(projectPath);
   } catch (error) {
