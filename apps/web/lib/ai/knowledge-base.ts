@@ -59,7 +59,7 @@ const EMBEDDING_MODEL = "Xenova/all-MiniLM-L6-v2";
 // file (.docx, .png, a zip) that produces garbage that still gets chunked,
 // embedded, and surfaced in search results and citations. Reject it up
 // front instead of silently indexing noise.
-export const ALLOWED_SOURCE_EXTS = new Set([".pdf", ".md", ".txt"]);
+export const ALLOWED_SOURCE_EXTS = new Set([".pdf", ".pptx", ".md", ".txt"]);
 export const MAX_SOURCE_BYTES = 50 * 1024 * 1024; // 50MB — generous for a single paper
 
 let embeddingPipelinePromise: Promise<
@@ -714,6 +714,29 @@ async function extractSourceText(
   metadata: AiSourceMetadata;
 }> {
   const ext = path.extname(fileName).toLowerCase();
+
+  if (ext === ".pptx") {
+    const { extractPptxSlides, extractPptxTitle } = await import("@/lib/ai/pptx");
+    const slides = await extractPptxSlides(data);
+    const coreTitle = await extractPptxTitle(data);
+    // First slide's first line is usually the deck title — same trust tier
+    // as a layout heuristic, so it's flagged heuristic unless core.xml had
+    // a real title property.
+    const firstLine = slides[0]?.text.split("\n")[0]?.trim();
+    return {
+      pageCount: slides.length,
+      pages: slides.map(({ slide, text }) => ({
+        page: slide,
+        text: normalizeWhitespace(text),
+      })),
+      metadata: {
+        title: coreTitle ?? (firstLine || undefined),
+        titleIsHeuristic: !coreTitle,
+        provenance: "heuristic",
+      },
+    };
+  }
+
   if (ext === ".pdf") {
     const { pages, metadata, layoutTitle, layoutAuthors } = await extractPdfPages(
       data,
@@ -1222,7 +1245,7 @@ export async function uploadAiSources(
     if (!ALLOWED_SOURCE_EXTS.has(ext)) {
       rejected.push({
         name: originalName,
-        reason: `Unsupported file type "${ext || "(none)"}" — only PDF, Markdown, and plain text are accepted`,
+        reason: `Unsupported file type "${ext || "(none)"}" — only PDF, PowerPoint (.pptx), Markdown, and plain text are accepted`,
       });
       continue;
     }
@@ -1261,7 +1284,14 @@ export async function uploadAiSources(
       originalName,
       storedName: saved.storedName,
       relativePath: saved.relativePath,
-      kind: ext === ".pdf" ? "pdf" : ext === ".md" ? "markdown" : "text",
+      kind:
+        ext === ".pdf"
+          ? "pdf"
+          : ext === ".pptx"
+            ? "pptx"
+            : ext === ".md"
+              ? "markdown"
+              : "text",
       bytes: file.size,
       contentHash,
       ingestedAt: nowIso(),

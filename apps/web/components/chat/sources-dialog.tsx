@@ -217,7 +217,7 @@ export function SourcesDialog({ open, onOpenChange }: SourcesDialogProps) {
           <DialogDescription>
             {manifest && manifest.sources.length > 0
               ? `${manifest.sources.length} source${manifest.sources.length === 1 ? "" : "s"} in your knowledge base.`
-              : "Add PDFs, markdown, or text files — they are indexed automatically and become part of what myWiki knows."}
+              : "Add PDFs, PowerPoint slides, markdown, or text files — they are indexed automatically and become part of what myWiki knows."}
           </DialogDescription>
         </DialogHeader>
 
@@ -226,7 +226,7 @@ export function SourcesDialog({ open, onOpenChange }: SourcesDialogProps) {
             ref={fileInputRef}
             className="hidden"
             type="file"
-            accept=".pdf,.md,.txt"
+            accept=".pdf,.pptx,.md,.txt"
             multiple
             onChange={handleFileChange}
           />

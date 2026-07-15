@@ -22,6 +22,18 @@ import {
   updateAiSourceMetadata,
   verifyAiCitation,
 } from "@/lib/ai/knowledge-base";
+import {
+  annotateRegisteredImage,
+  cropRegisteredImage,
+  extractPptxMediaImage,
+  getImageRecord,
+  imageUrl,
+  listPptxMedia,
+  readImagePng,
+  renderPdfPage,
+  type AiAnnotation,
+  type AiImageRecord,
+} from "@/lib/ai/images";
 import type { AiChatRequest, AiConversation } from "@/lib/ai/types";
 
 function callResult(text: unknown, isError = false): CallToolResult {
@@ -76,6 +88,8 @@ async function serializePrompt(
     "",
     "## Answering",
     "- Your job is knowledge, not writing: give the clearest, most correct answer to the question. You have no file-editing tools and never draft documents.",
+    "- Answer in the language of the question: a German question gets a German answer, an English question an English one. Keep source terminology as-is (e.g. a norm's defined German/English terms) where translating would change meaning.",
+    "- Everything you write outside tool calls is shown to the user as one continuous answer — so never narrate your process (\"searching now…\", \"found it, looks good, next I'll…\"). Work silently between tool calls and write only the polished answer itself.",
     "- Ground answers in the knowledge base first. For a substantive question, don't stop at the first useful chunk: search from multiple angles/phrasings — different terms, synonyms, related sub-questions, German and English where relevant — then synthesize one holistic answer across every relevant source.",
     "- Where the sources don't cover something (or the question goes beyond them), answer from your general knowledge — but make the boundary visible. Mark those parts briefly, e.g. a short parenthetical \"(general knowledge — not in your sources)\" or a one-line note; never blur what came from the library vs. from you.",
     "- If neither the sources nor your general knowledge support a confident answer, say so plainly.",
@@ -86,6 +100,13 @@ async function serializePrompt(
     "- Use LaTeX math ($inline$ or $$display$$) for every equation or formal definition — never ASCII-art math.",
     "- Use a ```mermaid fenced code block for structures and behavior: processes (flowchart TD/LR), sequences (sequenceDiagram), states (stateDiagram-v2), class/block structures (classDiagram), timelines, mindmaps. Systems-engineering questions (V-model, requirement flows, architectures, interfaces) very often deserve a diagram — reach for one whenever a picture beats a paragraph.",
     "- Combine forms freely: a short prose explanation plus a diagram or table usually beats either alone. Don't force a visual when text answers cleanly.",
+    "",
+    "## Source images (original figures from the library)",
+    "- When a source contains the actual figure for what's being asked (the V-model diagram in a handbook, an architecture figure in a paper, a chart on a slide), showing THAT original beats redrawing it. Workflow: find the page/slide via search or read_source_page, then for PDFs call view_page_image and crop_image to cut out just the figure; for pptx sources call list_slide_images + view_image. Embed the result with markdown: ![short description](its url).",
+    "- Every image you embed MUST be followed on the next line by an italic attribution, e.g. *Source: INCOSE Handbook, p. 34* — the tool result gives you the exact attribution string to use. Never show a source image without saying where it's from.",
+    "- You may annotate a source image when a mark genuinely helps the explanation (circle the relevant block, arrow to the step being discussed, highlight a region) via annotate_image. Annotations are strictly additive pointers: never cover, redact, or alter the figure's own content, labels, or terminology, never more marks than the point needs, and the attribution already says \"(annotated)\" — keep it. Prefer shapes over text labels; a label is for short pointers only (\"here\", \"Step 2\").",
+    "- Look at what each image tool returns (you see the image) and check it before embedding: is the crop clean, is the annotation on the right spot? Redo it if not — never embed an image you haven't visually checked.",
+    "- If no source contains a suitable figure, say so if the user asked for one, and fall back to a mermaid diagram (marked as your own rendering, not from a source).",
     "",
     "## Sources & attribution",
     "- Attribution is lightweight but honest: name which sources an answer draws on (title or short name, with page numbers when you have them). The goal is that the user knows where knowledge came from and can dig deeper — not bibliography-grade referencing.",
@@ -145,7 +166,7 @@ export function createMyWikiMcpServer(
         "browse_knowledge_base",
         "List every source and research note as a lightweight table of contents (title, kind, authors, year) without touching chunk/embedding data. Use this before searching, to see what's already available (including notes you saved in earlier turns) so you know which angles to search for.",
         {
-          kind: z.enum(["pdf", "markdown", "text", "note"]).optional(),
+          kind: z.enum(["pdf", "pptx", "markdown", "text", "note"]).optional(),
         },
         async (args) => {
           try {
@@ -352,8 +373,200 @@ export function createMyWikiMcpServer(
           }
         },
       ),
+      tool(
+        "view_page_image",
+        "Render a PDF source page as an image and look at it. Use this to find and visually locate a figure/diagram/table on a page before cropping it out with crop_image. Returns the rendered image (so you can see it) plus its id, url, and the attribution string to place under any embed.",
+        {
+          source_id: z.string(),
+          page: z.number().int().min(1),
+        },
+        async (args) => {
+          try {
+            const record = await renderPdfPage(projectDir, args.source_id, args.page);
+            return await imageToolResult(projectDir, record);
+          } catch (error) {
+            return callResult(
+              error instanceof Error ? error.message : "Failed to render page",
+              true,
+            );
+          }
+        },
+      ),
+      tool(
+        "list_slide_images",
+        "List the images embedded in a PowerPoint (.pptx) source, with the slide each one belongs to. Follow up with view_image on a media entry to actually see it.",
+        {
+          source_id: z.string(),
+          slide: z
+            .number()
+            .int()
+            .min(1)
+            .optional()
+            .describe("Only list images on this slide."),
+        },
+        async (args) => {
+          try {
+            const media = await listPptxMedia(projectDir, args.source_id);
+            const filtered = args.slide
+              ? media.filter((entry) => entry.slide === args.slide)
+              : media;
+            return normalizeToolResult({
+              images: filtered,
+              hint: "Call view_image with source_id + slide + media_name to see one.",
+            });
+          } catch (error) {
+            return callResult(
+              error instanceof Error ? error.message : "Failed to list slide images",
+              true,
+            );
+          }
+        },
+      ),
+      tool(
+        "view_image",
+        "Look at an image: either a registered image by image_id (e.g. to re-check a crop), or a pptx media image by source_id + slide + media_name (from list_slide_images), which registers it and returns its id/url.",
+        {
+          image_id: z.string().optional(),
+          source_id: z.string().optional(),
+          slide: z.number().int().min(1).optional(),
+          media_name: z.string().optional(),
+        },
+        async (args) => {
+          try {
+            if (args.image_id) {
+              const record = await getImageRecord(projectDir, args.image_id);
+              if (!record) return callResult({ error: "Image not found" }, true);
+              return await imageToolResult(projectDir, record);
+            }
+            if (args.source_id && args.slide && args.media_name) {
+              const record = await extractPptxMediaImage(
+                projectDir,
+                args.source_id,
+                args.slide,
+                args.media_name,
+              );
+              return await imageToolResult(projectDir, record);
+            }
+            return callResult(
+              { error: "Pass image_id, or source_id + slide + media_name" },
+              true,
+            );
+          } catch (error) {
+            return callResult(
+              error instanceof Error ? error.message : "Failed to view image",
+              true,
+            );
+          }
+        },
+      ),
+      tool(
+        "crop_image",
+        "Cut a region (the figure you want to show) out of a registered image — typically a page render from view_page_image. Coordinates are normalized 0-1 relative to that image: x,y is the top-left corner of the crop box. Returns the cropped image so you can check it's clean before embedding its url.",
+        {
+          image_id: z.string(),
+          x: z.number().min(0).max(1),
+          y: z.number().min(0).max(1),
+          width: z.number().min(0.01).max(1),
+          height: z.number().min(0.01).max(1),
+        },
+        async (args) => {
+          try {
+            const record = await cropRegisteredImage(projectDir, args.image_id, {
+              x: args.x,
+              y: args.y,
+              width: args.width,
+              height: args.height,
+            });
+            return await imageToolResult(projectDir, record);
+          } catch (error) {
+            return callResult(
+              error instanceof Error ? error.message : "Failed to crop image",
+              true,
+            );
+          }
+        },
+      ),
+      tool(
+        "annotate_image",
+        "Draw explanation marks on top of a registered image: circle, rect, arrow, highlight, or a short label. Strictly additive pointers — never cover or alter the figure's own content or terminology. Coordinates are normalized 0-1 (circle radius relative to image width). Produces a NEW image whose attribution ends in \"(annotated)\"; the original stays untouched. Returns the annotated image so you can check mark placement before embedding.",
+        {
+          image_id: z.string(),
+          annotations: z
+            .array(
+              z.object({
+                type: z.enum(["circle", "rect", "highlight", "arrow", "label"]),
+                x: z.number().min(0).max(1).optional(),
+                y: z.number().min(0).max(1).optional(),
+                width: z.number().min(0).max(1).optional(),
+                height: z.number().min(0).max(1).optional(),
+                radius: z.number().min(0.005).max(0.5).optional(),
+                fromX: z.number().min(0).max(1).optional(),
+                fromY: z.number().min(0).max(1).optional(),
+                toX: z.number().min(0).max(1).optional(),
+                toY: z.number().min(0).max(1).optional(),
+                text: z.string().max(40).optional(),
+                color: z.enum(["red", "blue", "green", "orange"]).optional(),
+              }),
+            )
+            .min(1)
+            .max(12),
+        },
+        async (args) => {
+          try {
+            const record = await annotateRegisteredImage(
+              projectDir,
+              args.image_id,
+              args.annotations as AiAnnotation[],
+            );
+            return await imageToolResult(projectDir, record);
+          } catch (error) {
+            return callResult(
+              error instanceof Error ? error.message : "Failed to annotate image",
+              true,
+            );
+          }
+        },
+      ),
     ],
   });
+}
+
+/**
+ * Tool result carrying the actual image (so the model can look at what it
+ * just rendered/cropped/annotated) plus the machine-readable bits it needs
+ * to embed it: the markdown url and the mandatory attribution line.
+ */
+async function imageToolResult(
+  projectDir: string,
+  record: AiImageRecord,
+): Promise<CallToolResult> {
+  const png = await readImagePng(projectDir, record.id);
+  if (!png) return callResult({ error: "Image file missing" }, true);
+  return {
+    content: [
+      {
+        type: "image",
+        data: png.toString("base64"),
+        mimeType: "image/png",
+      },
+      {
+        type: "text",
+        text: JSON.stringify(
+          {
+            imageId: record.id,
+            url: imageUrl(record),
+            width: record.width,
+            height: record.height,
+            kind: record.kind,
+            attribution: record.attribution,
+            embedAs: `![<short description>](${imageUrl(record)})\n*Source: ${record.attribution}*`,
+          },
+          null,
+          2,
+        ),
+      },
+    ],
+  } as CallToolResult;
 }
 
 // A pushable async-iterable "inbox": the persistent Query's prompt keeps

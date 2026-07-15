@@ -220,7 +220,7 @@ interface ChatAppProps {
 }
 
 export function ChatApp({ current }: ChatAppProps) {
-  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const scrollerRef = useRef<HTMLDivElement | null>(null);
   const [draft, setDraft] = useState("");
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const [browseOpen, setBrowseOpen] = useState(false);
@@ -265,8 +265,12 @@ export function ChatApp({ current }: ChatAppProps) {
     if (error) toast.error(error);
   }, [error]);
 
+  // Follow the conversation by scrolling ONLY the message list — never
+  // scrollIntoView, which also scrolls every scrollable ancestor (including
+  // the page itself) and was what let the view travel past the composer.
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    const scroller = scrollerRef.current;
+    if (scroller) scroller.scrollTop = scroller.scrollHeight;
   }, [activeConversation?.messages, chatLoading]);
 
   useEffect(() => {
@@ -394,7 +398,7 @@ export function ChatApp({ current }: ChatAppProps) {
 
       {hasMessages ? (
         <>
-          <div className="min-h-0 flex-1 overflow-y-auto">
+          <div ref={scrollerRef} className="min-h-0 flex-1 overflow-y-auto">
             <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-6">
               {messages.map((message) =>
                 message.role === "user" ? (
@@ -433,7 +437,6 @@ export function ChatApp({ current }: ChatAppProps) {
                 ),
               )}
               {isAwaitingFirstToken ? <ThinkingIndicator /> : null}
-              <div ref={messagesEndRef} />
             </div>
           </div>
           <div className="shrink-0 px-4 pb-4">

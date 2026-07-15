@@ -67,7 +67,7 @@ export const DEFAULT_CONTEXT_WINDOW_TOKENS = 1_000_000;
 // Agent SDK session) persists and resumes indefinitely.
 export const MAIN_CONVERSATION_ID = "main";
 
-export type AiSourceKind = "pdf" | "markdown" | "text" | "note";
+export type AiSourceKind = "pdf" | "pptx" | "markdown" | "text" | "note";
 
 export interface AiSourceMetadata {
   title?: string;

@@ -9,7 +9,11 @@ const nextConfig: NextConfig = {
   // pdfjs-dist's Node "fake worker" setup fails to resolve pdf.worker.mjs
   // inside a Turbopack chunk). Keeping them external lets Node's native
   // module resolution load them straight from node_modules instead.
-  serverExternalPackages: ["pdfjs-dist", "@huggingface/transformers"],
+  serverExternalPackages: [
+    "pdfjs-dist",
+    "@huggingface/transformers",
+    "@napi-rs/canvas",
+  ],
 };
 
 export default nextConfig;

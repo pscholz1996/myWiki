@@ -27,7 +27,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="h-full" suppressHydrationWarning>
+    <html lang="en" className="h-full overflow-hidden" suppressHydrationWarning>
       <head>
         {process.env.NODE_ENV === "development" && (
           <Script
@@ -41,7 +41,9 @@ export default function RootLayout({
         className={cn(
           geistSans.className,
           geistMono.variable,
-          "h-full antialiased",
+          // overflow-hidden: the page itself never scrolls — only the chat's
+          // message list does, so nothing can scroll past the composer.
+          "h-full overflow-hidden antialiased",
         )}
       >
         <RootProvider>{children}</RootProvider>

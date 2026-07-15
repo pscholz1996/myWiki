@@ -29,6 +29,30 @@ const WRAPPER_CLASS = [
   "[&_.katex-display]:overflow-x-auto [&_.katex-display]:overflow-y-hidden [&_.katex-display]:py-1",
 ].join(" ");
 
+// Source images (and any other embedded image) render as a framed figure;
+// clicking opens the full-size PNG in a new tab. White backing keeps
+// transparent PNGs readable in dark mode.
+function FigureImage(props: ComponentProps<"img">) {
+  if (!props.src || typeof props.src !== "string") return null;
+  return (
+    <a
+      href={props.src}
+      target="_blank"
+      rel="noreferrer"
+      className="my-3 block w-fit max-w-full cursor-zoom-in"
+      title="Open full size"
+    >
+      {/* biome-ignore lint/performance/noImgElement: dynamic same-origin API images */}
+      <img
+        src={props.src}
+        alt={props.alt ?? ""}
+        className="max-h-[28rem] max-w-full rounded-lg border bg-white object-contain p-1 shadow-sm"
+        loading="lazy"
+      />
+    </a>
+  );
+}
+
 // ```mermaid fences become live diagrams; every other code block renders
 // normally. react-markdown wraps code blocks as <pre><code>, so the switch
 // happens at the <pre> level to replace the whole block, not just its text.
@@ -58,7 +82,7 @@ export function AiMarkdown({ content }: { content: string }) {
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
         rehypePlugins={[rehypeKatex]}
-        components={{ pre: PreBlock }}
+        components={{ pre: PreBlock, img: FigureImage }}
       >
         {content}
       </ReactMarkdown>
