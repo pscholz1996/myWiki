@@ -335,11 +335,11 @@ export function ChatApp({ current }: ChatAppProps) {
     sources.map((source) => [source.id, source.originalName]),
   );
 
-  // A turn's first assistant_chunk is what actually creates its message
-  // entry — until then, a tool-call-heavy turn leaves the last message as
-  // the user's own, with nothing on screen showing work is happening.
-  const isAwaitingFirstToken =
-    chatLoading && messages[messages.length - 1]?.role === "user";
+  // The indicator stays for the WHOLE turn, not just until the first
+  // token: answers arrive in parts (text → tool calls → figure → more
+  // text), and after part one there was previously no way to tell "still
+  // working" from "done" — the turn only ends when chatLoading drops.
+  const isTurnRunning = chatLoading;
 
   useEffect(() => {
     void Promise.all([
@@ -606,7 +606,7 @@ export function ChatApp({ current }: ChatAppProps) {
                   </div>
                 ),
               )}
-              {isAwaitingFirstToken ? <ThinkingIndicator /> : null}
+              {isTurnRunning ? <ThinkingIndicator /> : null}
             </div>
           </div>
           <div className="shrink-0 px-4 pb-4">

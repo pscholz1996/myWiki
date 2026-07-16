@@ -8,6 +8,7 @@ import {
   updateAiConversation,
 } from "@/lib/ai/conversations";
 import { runMyWikiChatTurn } from "@/lib/ai/agent";
+import { joinAssistantPart } from "@/lib/ai/stream-text";
 import type {
   AiChatRequest,
   AiCitation,
@@ -287,8 +288,9 @@ export async function POST(req: Request) {
             if (kind === "assistant") {
               const chunk = assistantTextFromMessage(sdkMessage);
               if (chunk) {
-                assistantText += chunk;
-                push("assistant_chunk", { text: chunk });
+                const emitted = joinAssistantPart(assistantText, chunk);
+                assistantText += emitted;
+                push("assistant_chunk", { text: emitted });
               }
               const assistantError = (sdkMessage as any).error;
               if (assistantError) {
