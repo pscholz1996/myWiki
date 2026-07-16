@@ -1,6 +1,7 @@
 "use client";
 
 import type { ComponentProps } from "react";
+import { FileTextIcon } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import rehypeKatex from "rehype-katex";
 import remarkGfm from "remark-gfm";
@@ -18,7 +19,8 @@ const WRAPPER_CLASS = [
   "[&_h2]:mt-3 [&_h2]:mb-1.5 [&_h2]:text-[0.95rem] [&_h2]:font-semibold [&_h2:first-child]:mt-0",
   "[&_h3]:mt-2 [&_h3]:mb-1 [&_h3]:text-sm [&_h3]:font-semibold [&_h3:first-child]:mt-0",
   "[&_strong]:font-semibold",
-  "[&_a]:underline [&_a]:underline-offset-2",
+  // Chip-styled source labels (SmartLink) opt out of the prose underline.
+  "[&_a:not(.source-chip)]:underline [&_a:not(.source-chip)]:underline-offset-2",
   "[&_blockquote]:my-1.5 [&_blockquote]:border-l-2 [&_blockquote]:border-current/20 [&_blockquote]:pl-3 [&_blockquote]:opacity-80",
   "[&_hr]:my-3 [&_hr]:border-current/10",
   "[&_table]:my-2 [&_table]:w-full [&_table]:border-collapse [&_table]:text-xs",
@@ -52,6 +54,32 @@ function FigureImage(props: ComponentProps<"img">) {
   );
 }
 
+// Inline source references — markdown links the assistant writes after
+// source-grounded claims, targeting /api/ai/sources/<id>/file#page=N —
+// render as compact clickable labels (matching the verified-citation chips)
+// instead of underlined prose links. Every other link stays a normal link.
+function SmartLink(props: ComponentProps<"a">) {
+  const href = props.href ?? "";
+  if (href.startsWith("/api/ai/sources/")) {
+    return (
+      <a
+        href={href}
+        target="_blank"
+        rel="noreferrer"
+        className="source-chip mx-0.5 inline-flex translate-y-[-1px] items-center gap-1 rounded-full border px-1.5 py-px align-middle text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+      >
+        <FileTextIcon className="size-3 shrink-0" />
+        {props.children}
+      </a>
+    );
+  }
+  return (
+    <a {...props} target="_blank" rel="noreferrer">
+      {props.children}
+    </a>
+  );
+}
+
 // ```mermaid fences become live diagrams; every other code block renders
 // normally. react-markdown wraps code blocks as <pre><code>, so the switch
 // happens at the <pre> level to replace the whole block, not just its text.
@@ -81,7 +109,7 @@ export function AiMarkdown({ content }: { content: string }) {
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
         rehypePlugins={[rehypeKatex]}
-        components={{ pre: PreBlock, img: FigureImage }}
+        components={{ pre: PreBlock, img: FigureImage, a: SmartLink }}
       >
         {content}
       </ReactMarkdown>

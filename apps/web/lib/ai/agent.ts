@@ -106,6 +106,7 @@ async function serializePrompt(
     "",
     "## Source images (original figures from the library)",
     "- When a source contains the actual figure for what's being asked (the V-model diagram in a handbook, an architecture figure in a paper, a chart on a slide), showing THAT original beats redrawing it. Workflow: find the page/slide via search or read_source_page, then for PDFs call view_page_image and crop_image to cut out just the figure; for pptx sources call list_slide_images + view_image. Embed the result with markdown: ![short description](its url).",
+    "- Embed ONLY the figure, never the whole page: a full page render has no embeddable url (it is your working material for locating the figure) — always crop_image the exact figure region first, check the crop looks clean, and embed that. If the crop caught page furniture (headers, body text, neighboring figures), redo it tighter.",
     '- Do this proactively, not only when asked for an image: whenever your search results suggest a source has a figure that would genuinely help the explanation (search hits mentioning "Figure/Abbildung/Bild/Diagramm/Tabelle X", figure captions, slides that are clearly diagram slides), consider pulling it in on your own initiative. A question about a concept that a source illustrates deserves the source\'s illustration. Skip it when a figure adds nothing — proactive, not decorative.',
     "- Every image you embed MUST be followed on the next line by an italic attribution, e.g. *Source: INCOSE Handbook, p. 34* — the tool result gives you the exact attribution string to use. Never show a source image without saying where it's from.",
     '- You may annotate a source image when a mark genuinely helps the explanation (circle the relevant block, arrow to the step being discussed, highlight a region) via annotate_image. Annotations are strictly additive pointers: never cover, redact, or alter the figure\'s own content, labels, or terminology, never more marks than the point needs, and the attribution already says "(annotated)" — keep it. Prefer shapes over text labels; a label is for short pointers only ("here", "Step 2").',
@@ -113,7 +114,8 @@ async function serializePrompt(
     "- If no source contains a suitable figure, say so if the user asked for one, and fall back to a mermaid diagram (marked as your own rendering, not from a source).",
     "",
     "## Sources & attribution",
-    "- Attribution is lightweight but honest: name which sources an answer draws on (title or short name, with page numbers when you have them). The goal is that the user knows where knowledge came from and can dig deeper — not bibliography-grade referencing.",
+    "- Attribution is lightweight but honest: the user must always see where knowledge came from and be able to jump into the source — not bibliography-grade referencing.",
+    '- Inline source labels: whenever a claim, number, or finding comes from a specific source, follow it with an inline markdown link of the form [ShortName Year, S. N](/api/ai/sources/SOURCE_ID/file#page=N) — e.g. [Poulsen 2025, S. 5](/api/ai/sources/abc-123/file#page=5). The UI renders these as clickable source labels that open the PDF at that page. Use them instead of plain-text parentheses like "(Poulsen et al. 2025)": every source mention should be such a link. Keep the label short (first author + year, or a short title, plus page/slide). Use each source\'s real id from search results/browse.',
     "- For pivotal or surprising source-backed claims, verify the exact quote with cite() so the answer carries a verified source chip the user can open. Routine background claims don't each need their own cite() call.",
     "- If a quote cannot be verified, say so and keep searching instead of guessing.",
     "- A citation made earlier in THIS conversation is not automatically still valid (sources can be deleted mid-conversation) — re-verify with cite() before restating it as verified. Re-verification is something you silently DO, never something you narrate.",
@@ -582,6 +584,31 @@ async function imageToolResult(
 ): Promise<CallToolResult> {
   const png = await readImagePng(projectDir, record.id);
   if (!png) return callResult({ error: "Image file missing" }, true);
+
+  // Full page renders are working material, not deliverables — embedding a
+  // whole page where a single figure was meant looks broken to the user
+  // (seen live). Withholding the URL makes the crop step structurally
+  // unskippable instead of relying on the model remembering a rule.
+  const embeddable = record.kind !== "page-render";
+  const payload = embeddable
+    ? {
+        imageId: record.id,
+        url: imageUrl(record),
+        width: record.width,
+        height: record.height,
+        kind: record.kind,
+        attribution: record.attribution,
+        embedAs: `![<short description>](${imageUrl(record)})\n*Source: ${record.attribution}*`,
+      }
+    : {
+        imageId: record.id,
+        width: record.width,
+        height: record.height,
+        kind: record.kind,
+        attribution: record.attribution,
+        note: "Full page render — for locating the figure only, it cannot be embedded. Cut the figure out with crop_image (normalized bbox); the crop result is embeddable.",
+      };
+
   return {
     content: [
       {
@@ -591,19 +618,7 @@ async function imageToolResult(
       },
       {
         type: "text",
-        text: JSON.stringify(
-          {
-            imageId: record.id,
-            url: imageUrl(record),
-            width: record.width,
-            height: record.height,
-            kind: record.kind,
-            attribution: record.attribution,
-            embedAs: `![<short description>](${imageUrl(record)})\n*Source: ${record.attribution}*`,
-          },
-          null,
-          2,
-        ),
+        text: JSON.stringify(payload, null, 2),
       },
     ],
   } as CallToolResult;

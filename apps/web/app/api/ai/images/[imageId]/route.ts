@@ -33,6 +33,17 @@ export async function GET(
     return NextResponse.json({ error: "not-found" }, { status: 404 });
   }
 
+  // Full page renders are the assistant's working material for locating a
+  // figure — never a deliverable. Refusing to serve them means even a
+  // hand-constructed URL can't put a whole page into an answer; the crop
+  // (or annotated crop) is what gets embedded.
+  if (record.kind === "page-render") {
+    return NextResponse.json(
+      { error: "page-renders-are-not-embeddable" },
+      { status: 403 },
+    );
+  }
+
   return new NextResponse(new Uint8Array(png), {
     headers: {
       "Content-Type": "image/png",
