@@ -823,6 +823,16 @@ class LiveSession {
     return this.query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET();
   }
 
+  /**
+   * Aborts the CURRENT turn only — tool calls stop, the turn's result
+   * message comes back as interrupted, and the session (with all its
+   * context) stays alive for the next message. This is the stop button,
+   * not a teardown.
+   */
+  async interrupt(): Promise<void> {
+    await this.query.interrupt();
+  }
+
   close(): void {
     this.inbox.close();
     this.query.close();
@@ -849,6 +859,49 @@ function sessionKey(projectDir: string, conversationId: string): string {
  * conversationId) every session under the project — the latter is what
  * switching the knowledge folder needs.
  */
+/**
+ * Stop button: interrupt the running turn of one conversation's live
+ * session. Returns false when there is no live session to interrupt
+ * (turn already finished, or server restarted since it began).
+ */
+// Which conversations' running turns were stopped BY THE USER — lets the
+// chat route tell a deliberate stop apart from a genuine mid-turn error
+// (the SDK reports both as error_during_execution). globalThis-keyed for
+// the same dev-mode hot-reload reason as liveSessions.
+const globalForInterrupts = globalThis as unknown as {
+  __mywikiInterrupted?: Set<string>;
+};
+const interruptedTurns =
+  globalForInterrupts.__mywikiInterrupted ?? new Set<string>();
+globalForInterrupts.__mywikiInterrupted = interruptedTurns;
+
+/** True exactly once per user-initiated stop (consumed on read). */
+export function consumeUserInterrupt(
+  projectDir: string,
+  conversationId: string,
+): boolean {
+  return interruptedTurns.delete(sessionKey(projectDir, conversationId));
+}
+
+export async function interruptLiveSession(
+  projectDir: string,
+  conversationId: string,
+): Promise<boolean> {
+  const session = liveSessions.get(sessionKey(projectDir, conversationId));
+  if (!session) return false;
+  try {
+    interruptedTurns.add(sessionKey(projectDir, conversationId));
+    await session.interrupt();
+    return true;
+  } catch {
+    // A session whose transport already died (turn errored, subprocess
+    // gone) can't be interrupted — and doesn't need to be. Stop is
+    // best-effort by design.
+    interruptedTurns.delete(sessionKey(projectDir, conversationId));
+    return false;
+  }
+}
+
 export function closeLiveSession(
   projectDir: string,
   conversationId?: string,

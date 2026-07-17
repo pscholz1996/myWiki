@@ -23,6 +23,7 @@ import {
   fetchConversationList,
   fetchPlanUsage,
   saveAnswerAsNote,
+  stopChatTurn,
   streamAiChat,
   updateAiSourceMetadata,
   uploadAiSources,
@@ -69,6 +70,7 @@ interface AiState {
     updates: { title: string; authors: string[]; year: string },
   ) => Promise<void>;
   loadConversations: () => Promise<void>;
+  stopTurn: () => Promise<void>;
   startNewConversation: () => Promise<void>;
   switchConversation: (conversationId: string) => Promise<void>;
   removeConversation: (conversationId: string) => Promise<void>;
@@ -320,6 +322,19 @@ export const useAiStore = create<AiState>((set, get) => ({
       set({ conversations: await fetchConversationList() });
     } catch {
       // History list is a convenience — a failed load shouldn't block chat.
+    }
+  },
+
+  // Abort the running turn; the open chat stream ends on its own (keeping
+  // any partial text), so chatLoading is cleared by sendMessage's finally,
+  // not here.
+  async stopTurn() {
+    const conversation = get().activeConversation;
+    if (!conversation || !get().chatLoading) return;
+    try {
+      await stopChatTurn(conversation.id);
+    } catch {
+      // Worst case the turn just runs to completion — no state to unwind.
     }
   },
 

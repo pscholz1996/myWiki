@@ -7,7 +7,11 @@ import {
   readAiConversation,
   updateAiConversation,
 } from "@/lib/ai/conversations";
-import { runMyWikiChatTurn } from "@/lib/ai/agent";
+import {
+  closeLiveSession,
+  consumeUserInterrupt,
+  runMyWikiChatTurn,
+} from "@/lib/ai/agent";
 import { joinAssistantPart } from "@/lib/ai/stream-text";
 import type {
   AiChatRequest,
@@ -229,6 +233,9 @@ export async function POST(req: Request) {
         // rate limit, overload, etc.) — surfaced as a friendly toast
         // instead of leaving the user to infer it from a stalled response.
         let turnErrorMessage: string | undefined;
+        // Verbatim SDK result errors — inspected (not shown) to recognize
+        // recoverable failures like a lost session transcript.
+        let rawResultErrors = "";
         const pendingCitations = new Map<
           string,
           { sourceId: string; page: number; quote: string }
@@ -245,8 +252,14 @@ export async function POST(req: Request) {
           // but the conversation is forever. Store the reason ON the message
           // so the transcript itself says what happened (seen live: a plan
           // rate limit rejecting the turn left an empty answer with no clue).
-          const failureNote =
-            assistantText.trim().length === 0
+          // A user-initiated stop reports as error_during_execution too —
+          // but it's not an error, so it gets its own calm note and no
+          // error toast.
+          const wasUserStop = consumeUserInterrupt(projectDir, conversation.id);
+          if (wasUserStop) turnErrorMessage = undefined;
+          const failureNote = wasUserStop
+            ? "You stopped this answer."
+            : assistantText.trim().length === 0
               ? (turnErrorMessage ??
                 "The assistant turn ended without producing an answer — likely a transient error. Please ask again.")
               : turnErrorMessage;
@@ -274,12 +287,21 @@ export async function POST(req: Request) {
           return nextConversation;
         };
 
-        try {
+        // The SDK stores session transcripts per working directory, so a
+        // moved knowledge folder (or a cleaned ~/.claude) makes --resume
+        // fail with "No conversation found with session ID". That's
+        // recoverable: mint a fresh SDK session for this conversation and
+        // run the turn again — the in-app transcript is untouched; only
+        // the model's in-session memory of earlier turns is lost.
+        const isLostSession = () =>
+          rawResultErrors.includes("No conversation found with session ID");
+
+        const runTurn = async (asNewSession: boolean) => {
           for await (const sdkMessage of runMyWikiChatTurn(
             projectDir,
             conversation,
             body,
-            isNewSession,
+            asNewSession,
           )) {
             push("sdk", sdkMessage);
             collectCitation(sdkMessage, pendingCitations, citations);
@@ -309,6 +331,7 @@ export async function POST(req: Request) {
               }
               if ((sdkMessage as any).is_error) {
                 const resultMessage = sdkMessage as any;
+                rawResultErrors = (resultMessage.errors ?? []).join("; ");
                 turnErrorMessage =
                   friendlySdkError(resultMessage.subtype) ??
                   resultMessage.errors?.[0] ??
@@ -347,6 +370,21 @@ export async function POST(req: Request) {
                 postTokens: metadata.post_tokens,
               });
             }
+          }
+        };
+
+        try {
+          await runTurn(isNewSession);
+
+          if (isLostSession() && assistantText.trim().length === 0) {
+            console.warn(
+              `[ai/chat] SDK session ${conversation.sdkSessionId} not found (knowledge folder moved?) — starting a fresh session for conversation ${conversation.id}`,
+            );
+            closeLiveSession(projectDir, conversation.id);
+            conversation = { ...conversation, sdkSessionId: randomUUID() };
+            rawResultErrors = "";
+            turnErrorMessage = undefined;
+            await runTurn(true);
           }
 
           const nextConversation = await persistAssistantReply();

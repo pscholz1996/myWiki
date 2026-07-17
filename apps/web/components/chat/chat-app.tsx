@@ -14,6 +14,7 @@ import {
   MoonIcon,
   MoreHorizontalIcon,
   ShieldCheckIcon,
+  SquareIcon,
   SquarePenIcon,
   SunIcon,
   Trash2Icon,
@@ -228,12 +229,14 @@ function Composer({
   draft,
   onDraftChange,
   onSend,
+  onStop,
   sending,
   autoFocus,
 }: {
   draft: string;
   onDraftChange: (value: string) => void;
   onSend: () => void;
+  onStop: () => void;
   sending: boolean;
   autoFocus?: boolean;
 }) {
@@ -259,19 +262,29 @@ function Composer({
           <SiClaude className="size-3.5" color="#D97757" />
           Powered by Claude
         </div>
-        <Button
-          size="icon"
-          className="size-8 rounded-full"
-          onClick={onSend}
-          disabled={sending || !draft.trim()}
-          title="Send"
-        >
-          {sending ? (
-            <Loader2Icon className="size-4 animate-spin" />
-          ) : (
+        {sending ? (
+          // While a turn runs, the send button becomes the stop button —
+          // aborts the turn (keeping any partial answer), never the session.
+          <Button
+            size="icon"
+            variant="outline"
+            className="size-8 rounded-full"
+            onClick={onStop}
+            title="Stop this answer"
+          >
+            <SquareIcon className="size-3.5 fill-current" />
+          </Button>
+        ) : (
+          <Button
+            size="icon"
+            className="size-8 rounded-full"
+            onClick={onSend}
+            disabled={!draft.trim()}
+            title="Send"
+          >
             <ArrowUpIcon className="size-4" />
-          )}
-        </Button>
+          </Button>
+        )}
       </div>
     </div>
   );
@@ -323,6 +336,7 @@ export function ChatApp({ current }: ChatAppProps) {
   const switchConversation = useAiStore((state) => state.switchConversation);
   const removeConversation = useAiStore((state) => state.removeConversation);
   const sendMessage = useAiStore((state) => state.sendMessage);
+  const stopTurn = useAiStore((state) => state.stopTurn);
   const compactionNotice = useAiStore((state) => state.compactionNotice);
   const dismissCompactionNotice = useAiStore(
     (state) => state.dismissCompactionNotice,
@@ -412,6 +426,7 @@ export function ChatApp({ current }: ChatAppProps) {
       draft={draft}
       onDraftChange={setDraft}
       onSend={handleSend}
+      onStop={() => void stopTurn()}
       sending={chatLoading}
       autoFocus
     />

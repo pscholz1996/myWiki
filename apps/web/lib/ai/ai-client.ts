@@ -198,6 +198,18 @@ export async function createConversation(): Promise<AiConversation> {
   return data.conversation;
 }
 
+export async function stopChatTurn(
+  conversationId: string,
+): Promise<{ stopped: boolean }> {
+  const res = await fetch("/api/ai/chat/stop", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ conversationId }),
+  });
+  if (!res.ok) throw await errFrom(res);
+  return res.json() as Promise<{ stopped: boolean }>;
+}
+
 export async function saveAnswerAsNote(params: {
   title: string;
   content: string;
