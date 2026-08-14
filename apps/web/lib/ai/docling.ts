@@ -28,8 +28,12 @@ const MAX_STDOUT_BYTES = 256 * 1024 * 1024;
 
 function candidatePythonPaths(): string[] {
   const override = process.env.MYWIKI_DOCLING_PYTHON;
+  const venvPython =
+    process.platform === "win32"
+      ? "tools/docling/.venv/Scripts/python.exe"
+      : "tools/docling/.venv/bin/python";
   const fromCwd = (relative: string) =>
-    path.resolve(process.cwd(), relative, "tools/docling/.venv/bin/python");
+    path.resolve(process.cwd(), relative, venvPython);
   return [
     ...(override ? [override] : []),
     // next dev/start runs with cwd at apps/web; tests and scripts may run
@@ -96,6 +100,13 @@ export async function convertWithDocling(
         // treat as terminal control noise.
         HF_HUB_DISABLE_PROGRESS_BARS: "1",
         TOKENIZERS_PARALLELISM: "false",
+        // Docling runs its layout model through torch.compile, whose
+        // inductor backend shells out to a C++ compiler. On Windows that
+        // is MSVC's cl.exe, which only exists once Visual Studio Build
+        // Tools are installed (an admin-rights install) — without it the
+        // compile error aborts the whole conversion. Eager mode is the
+        // only thing that works out of the box there.
+        ...(process.platform === "win32" ? { TORCHDYNAMO_DISABLE: "1" } : {}),
       },
     },
   );

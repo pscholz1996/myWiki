@@ -57,6 +57,7 @@ vi.mock("./crossref", async (importOriginal) => {
   };
 });
 
+import { closeIndexDbs } from "./index-db";
 import {
   chunkText,
   readAiSourcePage,
@@ -165,6 +166,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  closeIndexDbs();
   fs.rmSync(projectDir, { recursive: true, force: true });
 });
 

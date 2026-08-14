@@ -175,6 +175,18 @@ export function deleteChunksBySource(
   run(sourceIds);
 }
 
+/**
+ * Closes every cached connection. Windows refuses to delete or rename a
+ * directory holding an open SQLite file, so anything that discards an index
+ * directory (tests, switching knowledge folders) must release the handles.
+ */
+export function closeIndexDbs(): void {
+  for (const db of openDbs.values()) {
+    if (db.open) db.close();
+  }
+  openDbs.clear();
+}
+
 /** Drops all index content (rebuild path) while keeping the file/handle. */
 export function clearIndexDb(db: Database.Database): void {
   db.exec("DELETE FROM chunks; DELETE FROM chunks_fts; DELETE FROM meta;");

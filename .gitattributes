@@ -1,0 +1,3 @@
+# Biome's formatter enforces LF, so a CRLF checkout (Git's Windows default)
+# would report every file in the repo as unformatted.
+* text=auto eol=lf
