@@ -21,7 +21,7 @@ import {
   Trash2Icon,
   TriangleAlertIcon,
 } from "lucide-react";
-import { SiClaude } from "@icons-pack/react-simple-icons";
+import { SiClaude, SiGithub } from "@icons-pack/react-simple-icons";
 import { useTheme } from "next-themes";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -36,11 +36,13 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { TooltipIconButton } from "@/components/ui/tooltip-icon-button";
 import { ClaudeAccountMenu } from "@/components/account/claude-account-menu";
+import { MyWikiLogo } from "@/components/brand/mywiki-logo";
 import { DirectoryBrowserModal } from "@/components/project/directory-browser-modal";
 import { useAiStore } from "@/stores/ai-store";
 import type { AiMessage, AiPlanUsage } from "@/lib/ai/types";
 import { findModelOption } from "@/lib/ai/types";
 import { basename } from "@/lib/project/path-utils";
+import packageJson from "@/package.json";
 import { AiMarkdown } from "./markdown";
 import { SourcesDialog } from "./sources-dialog";
 
@@ -296,6 +298,30 @@ function ModelPicker({ disabled }: { disabled?: boolean }) {
   );
 }
 
+/**
+ * Quiet link to the project's source, parked in the bottom-left corner.
+ *
+ * The URL comes from package.json's `repository` field rather than a literal,
+ * so a fork or a rename can't leave this pointing at the wrong repo. The
+ * composer above reserves room for it (see the pb-9 wrapper), which is why
+ * this can be absolutely positioned without ever landing on the input.
+ */
+function RepoLink() {
+  return (
+    <a
+      href={packageJson.repository.url}
+      target="_blank"
+      rel="noopener noreferrer"
+      title="myWiki on GitHub"
+      className="absolute bottom-3 left-3 text-muted-foreground transition-colors hover:text-foreground"
+    >
+      {/* Without an explicit currentColor the pack paints its brand colour. */}
+      <SiGithub className="size-4" color="currentColor" />
+      <span className="sr-only">myWiki on GitHub</span>
+    </a>
+  );
+}
+
 function Composer({
   draft,
   onDraftChange,
@@ -517,13 +543,18 @@ export function ChatApp({ current }: ChatAppProps) {
   );
 
   return (
-    <div className="flex h-full flex-col bg-background">
+    <div className="relative flex h-full flex-col bg-background">
       <header className="flex h-12 shrink-0 items-center justify-between border-b px-3">
-        <div className="flex items-baseline gap-2">
-          <span className="font-semibold text-sm">myWiki</span>
-          <span className="text-muted-foreground text-xs">
-            {basename(current)}
-          </span>
+        <div className="flex items-center gap-2">
+          <MyWikiLogo className="size-5 shrink-0" />
+          {/* The two labels keep their own baseline row, so adding the mark
+              above doesn't push the folder name off the wordmark's baseline. */}
+          <div className="flex items-baseline gap-2">
+            <span className="font-semibold text-sm">myWiki</span>
+            <span className="text-muted-foreground text-xs">
+              {basename(current)}
+            </span>
+          </div>
         </div>
         <div className="flex items-center gap-0.5">
           <TooltipIconButton
@@ -708,7 +739,10 @@ export function ChatApp({ current }: ChatAppProps) {
               {isTurnRunning ? <ThinkingIndicator /> : null}
             </div>
           </div>
-          <div className="shrink-0 px-4 pb-4">
+          {/* pb-9 instead of pb-4: the extra strip is what keeps RepoLink out
+              of the composer on narrow windows, where the input runs the full
+              width and would otherwise sit under the icon. */}
+          <div className="shrink-0 px-4 pb-9">
             <div className="mx-auto w-full max-w-3xl">{composer}</div>
           </div>
         </>
@@ -729,6 +763,8 @@ export function ChatApp({ current }: ChatAppProps) {
           </div>
         </div>
       )}
+
+      <RepoLink />
 
       <SourcesDialog open={sourcesOpen} onOpenChange={setSourcesOpen} />
       <DirectoryBrowserModal
