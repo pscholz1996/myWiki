@@ -4,7 +4,9 @@
 
 - Node.js 20+
 - pnpm 10+
-- Python 3.12 or 3.13 (optional — only for the Docling conversion sidecar)
+- Python 3.10–3.14, 64-bit (optional — only for the Docling conversion
+  sidecar). On Windows the 32-bit build will not do: PyTorch publishes no
+  32-bit wheels. `pnpm setup:docling` checks this before installing anything.
 
 ## Setup
 
@@ -30,7 +32,7 @@ For markedly better PDF extraction (reading order, tables, section
 structure — especially norms and multi-column papers):
 
 ```bash
-bash tools/docling/setup.sh
+pnpm setup:docling            # add a python path to override the autodetect
 ```
 
 This creates a private venv (~1.3 GB including PyTorch) under

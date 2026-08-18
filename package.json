@@ -15,7 +15,8 @@
     "dev": "pnpm turbo dev",
     "dev:web": "pnpm turbo dev --filter=@mywiki/web",
     "lint": "pnpm exec biome check",
-    "lint:fix": "pnpm exec biome check --fix"
+    "lint:fix": "pnpm exec biome check --fix",
+    "setup:docling": "node tools/docling/setup.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.3.13",

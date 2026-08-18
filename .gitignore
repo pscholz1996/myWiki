@@ -36,6 +36,11 @@ yarn-error.log*
 .DS_Store
 *.pem
 
-# Docling sidecar venv (local, ~1.3GB — recreate with tools/docling/setup.sh)
+# Docling sidecar venv (local, ~1.3GB — recreate with `pnpm setup:docling`)
 tools/docling/.venv
+
+# Claude Code's per-machine scratch (launch configs, granted permissions).
+# Machine-local by nature: a launch config that names pnpm.cmd is correct on
+# Windows and broken on macOS, so there is nothing here worth sharing.
+.claude/
 
