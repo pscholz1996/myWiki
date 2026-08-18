@@ -6,6 +6,7 @@ import { FolderOpenIcon, FolderIcon, FolderPlusIcon } from "lucide-react";
 import { SiGithub } from "@icons-pack/react-simple-icons";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { MyWikiLogo } from "@/components/brand/mywiki-logo";
 import { DirectoryBrowserModal } from "./directory-browser-modal";
 import { NewProjectDialog } from "./new-project-dialog";
 import { basename } from "@/lib/project/path-utils";
@@ -58,7 +59,14 @@ export function WelcomeScreen({ recent }: WelcomeScreenProps) {
       <div className="relative flex h-full w-full items-center justify-center bg-background">
         <div className="w-full max-w-lg space-y-6 px-6">
           <div className="space-y-1">
-            <h1 className="font-semibold text-2xl">myWiki</h1>
+            {/* Larger than the header's 20px mark: this is the one screen
+                that is nothing but the app introducing itself, and size-8
+                matches text-2xl's line box exactly, so the two align without
+                a nudge. */}
+            <div className="flex items-center gap-2.5">
+              <MyWikiLogo className="size-8 shrink-0" />
+              <h1 className="font-semibold text-2xl">myWiki</h1>
+            </div>
             <p className="text-muted-foreground text-sm">
               Choose the folder where your knowledge base lives (or should live)
               — sources and index are stored there, chat happens here.
@@ -141,7 +149,7 @@ export function WelcomeScreen({ recent }: WelcomeScreenProps) {
         <span>myWiki v{packageJson.version}</span>
         <span>·</span>
         <a
-          href="https://github.com/pscholz1996"
+          href={packageJson.repository.url}
           target="_blank"
           rel="noopener noreferrer"
           className="flex items-center gap-1 transition-colors hover:text-foreground"
