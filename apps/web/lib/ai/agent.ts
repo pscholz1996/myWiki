@@ -4,6 +4,7 @@ import {
   tool,
 } from "@anthropic-ai/claude-agent-sdk";
 import type {
+  ModelInfo,
   Query,
   SDKControlGetUsageResponse,
   SDKMessage,
@@ -34,7 +35,12 @@ import {
   type AiAnnotation,
   type AiImageRecord,
 } from "@/lib/ai/images";
-import type { AiChatRequest, AiConversation } from "@/lib/ai/types";
+import type {
+  AiChatRequest,
+  AiConversation,
+  AiModelOption,
+} from "@/lib/ai/types";
+import { DEFAULT_MODEL } from "@/lib/ai/types";
 
 function callResult(text: unknown, isError = false): CallToolResult {
   return {
@@ -731,6 +737,9 @@ class LiveSession {
   private inbox = new PushableQueue<SDKUserMessage>();
   private query: Query;
   private currentTurn: TurnMessageStream | null = null;
+  // The model this session is currently running, so a turn can tell an
+  // actual switch apart from the same model being re-sent every message.
+  private model: string;
 
   constructor(options: {
     cwd: string;
@@ -747,6 +756,8 @@ class LiveSession {
     const sessionOptions = options.isNewSession
       ? { sessionId: options.sdkSessionId }
       : { resume: options.sdkSessionId };
+
+    this.model = options.model;
 
     this.query = query({
       prompt: this.inbox,
@@ -805,6 +816,33 @@ class LiveSession {
     await this.query.setMcpServers({
       mywiki: createMyWikiMcpServer(cwd, sourceIds),
     });
+  }
+
+  /**
+   * Switches the model this session runs from the next turn on — the same
+   * live reconfigure Claude Code's own /model does, so the conversation and
+   * its whole accumulated context survive the switch instead of being
+   * restarted under a new model.
+   *
+   * Returns false when the control request failed, which the caller must
+   * treat as "this session is stuck on the old model": silently answering
+   * with a model the user didn't pick is the one outcome worth a cold
+   * restart over.
+   */
+  async applyModel(model: string): Promise<boolean> {
+    if (model === this.model) return true;
+    try {
+      await this.query.setModel(model);
+      this.model = model;
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Models this account may actually use, as the CLI reports them. */
+  async supportedModels(): Promise<ModelInfo[]> {
+    return this.query.supportedModels();
   }
 
   async *runTurn(userMessage: SDKUserMessage): AsyncGenerator<SDKMessage> {
@@ -940,6 +978,86 @@ export async function getPlanUsage(
   }
 }
 
+// Asking the CLI for the model list costs a subprocess spawn plus an auth
+// round-trip (~seconds), and the answer only changes when the account's
+// plan does — cache it for the life of the server process. globalThis-keyed
+// for the same dev-mode hot-reload reason as liveSessions.
+const globalForModels = globalThis as unknown as {
+  __mywikiModels?: Promise<AiModelOption[]>;
+};
+
+function toModelOption(info: ModelInfo): AiModelOption {
+  return {
+    value: info.value,
+    resolvedModel: info.resolvedModel,
+    displayName: info.displayName,
+    description: info.description,
+  };
+}
+
+/**
+ * The models this account may actually use, exactly as the CLI reports them
+ * (the same list Claude Code's own model picker shows) — never a hardcoded
+ * catalog, which would drift and offer models the plan can't run.
+ *
+ * Throws when the list can't be obtained (not logged in, CLI missing); the
+ * caller decides whether to surface that or fall back.
+ */
+export async function listSupportedModels(
+  projectDir: string,
+): Promise<AiModelOption[]> {
+  if (globalForModels.__mywikiModels) return globalForModels.__mywikiModels;
+
+  const load = (async () => {
+    // A live session can answer this over its existing control channel —
+    // free compared to spawning a second CLI just to read a list.
+    const prefix = `${projectDir}::`;
+    const live = [...liveSessions.entries()].find(([key]) =>
+      key.startsWith(prefix),
+    )?.[1];
+    if (live) {
+      try {
+        return (await live.supportedModels()).map(toModelOption);
+      } catch {
+        // Fall through to a throwaway session below.
+      }
+    }
+
+    // Before the first message there is no live session, but the picker
+    // still has to be populated. `persistSession: false` keeps this probe
+    // from leaving a stray session behind in the user's ~/.claude history,
+    // and the prompt stream never yields, so no turn is ever billed — only
+    // the control request runs. It parks on a promise that never settles
+    // (not a timer, which would hold the event loop open past close()); the
+    // finally below is what actually ends the subprocess.
+    const probe = query({
+      prompt: (async function* (): AsyncGenerator<SDKUserMessage> {
+        await new Promise<never>(() => {});
+      })(),
+      options: {
+        cwd: projectDir,
+        persistSession: false,
+        permissionMode: "bypassPermissions",
+        allowDangerouslySkipPermissions: true,
+        tools: [],
+      },
+    });
+    try {
+      return (await probe.supportedModels()).map(toModelOption);
+    } finally {
+      probe.close();
+    }
+  })();
+
+  // Only a successful lookup is worth caching — a failure here usually
+  // means "not logged in yet", which the very next request may fix.
+  globalForModels.__mywikiModels = load;
+  load.catch(() => {
+    globalForModels.__mywikiModels = undefined;
+  });
+  return load;
+}
+
 export async function* runMyWikiChatTurn(
   projectDir: string,
   conversation: AiConversation,
@@ -948,10 +1066,28 @@ export async function* runMyWikiChatTurn(
 ) {
   const prompt = await serializePrompt(projectDir, conversation, request);
   const sdkSessionId = conversation.sdkSessionId ?? conversation.id;
-  const model = request.model ?? conversation.model ?? "claude-sonnet-5";
+  const model = request.model ?? conversation.model ?? DEFAULT_MODEL;
 
   const key = sessionKey(projectDir, conversation.id);
   let session = liveSessions.get(key);
+  // A live session already owns an SDK session under sdkSessionId, so if it
+  // has to be rebuilt below it must RESUME that id — re-sending it as
+  // `sessionId` collides with the persisted session and kills the CLI.
+  let startFresh = isNewSession;
+
+  if (session) {
+    await session.rescopeSources(projectDir, conversation.sourceIds);
+    // The model the user picked has to reach an already-running session
+    // too. Without this a mid-conversation switch was accepted by the UI,
+    // persisted to disk, and then quietly ignored: the session kept
+    // answering with whatever model it was constructed with.
+    if (!(await session.applyModel(model))) {
+      closeLiveSession(projectDir, conversation.id);
+      session = undefined;
+      startFresh = false;
+    }
+  }
+
   if (!session) {
     // One CLI subprocess per live conversation would accumulate as the
     // user switches around their history — close the project's other
@@ -962,12 +1098,10 @@ export async function* runMyWikiChatTurn(
       cwd: projectDir,
       sourceIds: conversation.sourceIds,
       model,
-      isNewSession,
+      isNewSession: startFresh,
       sdkSessionId,
     });
     liveSessions.set(key, session);
-  } else {
-    await session.rescopeSources(projectDir, conversation.sourceIds);
   }
 
   const userMessage: SDKUserMessage = {

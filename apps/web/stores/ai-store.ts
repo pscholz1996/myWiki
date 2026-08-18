@@ -7,22 +7,30 @@ import type {
   AiConversationSummary,
   AiManifest,
   AiMessage,
+  AiModelOption,
   AiPlanUsage,
   AiRejectedSourceFile,
   AiSourceRecord,
   AiUploadProgressEvent,
   AiUploadWarning,
 } from "@/lib/ai/types";
-import { MAIN_CONVERSATION_ID } from "@/lib/ai/types";
+import {
+  DEFAULT_MODEL,
+  FALLBACK_MODEL_OPTIONS,
+  MAIN_CONVERSATION_ID,
+  toPickerOptions,
+} from "@/lib/ai/types";
 import {
   createConversation,
   deleteAiSource,
   deleteConversation,
   fetchAiConversation,
   fetchAiManifest,
+  fetchAiModels,
   fetchConversationList,
   fetchPlanUsage,
   saveAnswerAsNote,
+  setConversationModel,
   stopChatTurn,
   streamAiChat,
   updateAiSourceMetadata,
@@ -43,6 +51,22 @@ function persistActiveConversationId(id: string): void {
   localStorage.setItem(ACTIVE_CONVERSATION_KEY, id);
 }
 
+// The model a NEW conversation starts on. Each conversation carries its own
+// model server-side, but a user who switched to Opus once means it as a
+// preference, not a one-off — the same way Claude Code remembers /model
+// across sessions.
+const PREFERRED_MODEL_KEY = "mywiki-preferred-model";
+
+function readPreferredModel(): string {
+  if (typeof window === "undefined") return DEFAULT_MODEL;
+  return localStorage.getItem(PREFERRED_MODEL_KEY) ?? DEFAULT_MODEL;
+}
+
+function persistPreferredModel(model: string): void {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(PREFERRED_MODEL_KEY, model);
+}
+
 interface AiState {
   manifest: AiManifest | null;
   sources: AiSourceRecord[];
@@ -56,6 +80,12 @@ interface AiState {
   uploadProgress: AiUploadProgressEvent | null;
   compactionNotice: AiCompactionNotice | null;
   planUsage: AiPlanUsage | null;
+  /** Rows for the composer's model picker, as the CLI reports them. */
+  models: AiModelOption[];
+  /** Model the next message will run on. */
+  selectedModel: string;
+  loadModels: () => Promise<void>;
+  selectModel: (model: string) => void;
   dismissCompactionNotice: () => void;
   loadSources: () => Promise<void>;
   loadConversation: () => Promise<void>;
@@ -167,6 +197,42 @@ export const useAiStore = create<AiState>((set, get) => ({
   uploadProgress: null,
   compactionNotice: null,
   planUsage: null,
+  // Same shape the route serves, so the picker doesn't reshuffle its rows
+  // the moment the live list arrives.
+  models: toPickerOptions(FALLBACK_MODEL_OPTIONS),
+  selectedModel: readPreferredModel(),
+
+  // Best-effort, like loadPlanUsage: the route already falls back to a
+  // built-in list, so there is nothing here worth a user-facing error.
+  async loadModels() {
+    try {
+      const { models } = await fetchAiModels();
+      if (models.length > 0) set({ models });
+    } catch {
+      // Keep whatever list is already in place.
+    }
+  },
+
+  // Takes effect on the next message. The active conversation is patched
+  // server-side right away so the choice survives a reload even if the user
+  // switches and then walks away without asking anything.
+  selectModel(model: string) {
+    if (get().selectedModel === model) return;
+    set({ selectedModel: model });
+    persistPreferredModel(model);
+
+    const conversation = get().activeConversation;
+    set({
+      activeConversation: conversation ? { ...conversation, model } : null,
+    });
+
+    // A conversation that has no messages yet doesn't exist on disk — the
+    // first chat request creates it with this model anyway.
+    if (!conversation || conversation.messages.length === 0) return;
+    void setConversationModel(conversation.id, model).catch(() => {
+      // Non-fatal: the model still rides along on the next chat request.
+    });
+  },
 
   async loadSources() {
     const token = ++sourcesOpSeq;
@@ -197,6 +263,10 @@ export const useAiStore = create<AiState>((set, get) => ({
       set({
         activeConversation: conversation,
         currentSourceIds: conversation?.sourceIds ?? [],
+        // The conversation's own model wins over the remembered preference:
+        // reopening a chat that ran on Opus must not silently continue it
+        // on something else.
+        selectedModel: conversation?.model ?? readPreferredModel(),
       });
     } catch (error) {
       set({
@@ -343,11 +413,12 @@ export const useAiStore = create<AiState>((set, get) => ({
   async startNewConversation() {
     set({ actionLoading: true, error: null });
     try {
-      const conversation = await createConversation();
+      const conversation = await createConversation(get().selectedModel);
       persistActiveConversationId(conversation.id);
       set({
         activeConversation: conversation,
         currentSourceIds: conversation.sourceIds,
+        selectedModel: conversation.model,
         planUsage: null,
       });
       await get().loadConversations();
@@ -373,6 +444,7 @@ export const useAiStore = create<AiState>((set, get) => ({
       set({
         activeConversation: conversation,
         currentSourceIds: conversation.sourceIds,
+        selectedModel: conversation.model,
         planUsage: null,
       });
     } catch (error) {
@@ -443,7 +515,7 @@ export const useAiStore = create<AiState>((set, get) => ({
 
     const activeConversation: AiConversation = get().activeConversation ?? {
       id: readActiveConversationId(),
-      model: "claude-sonnet-5",
+      model: get().selectedModel,
       // Optimistic placeholder only — never sent to the server (AiChatRequest
       // has no sdkSessionId field) and overwritten once the real conversation
       // reloads. Still a real UUID, not MAIN_CONVERSATION_ID, so nothing that
@@ -467,7 +539,10 @@ export const useAiStore = create<AiState>((set, get) => ({
       message: trimmed,
       conversationId: nextConversation.id,
       sourceIds: nextConversation.sourceIds,
-      model: nextConversation.model,
+      // The picker is the single source of truth for the turn about to run
+      // — reading it here (rather than the conversation snapshot) means a
+      // switch made just before hitting send still applies to this message.
+      model: get().selectedModel,
     };
 
     try {

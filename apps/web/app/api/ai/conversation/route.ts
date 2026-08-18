@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import {
   deleteAiConversation,
   readAiConversation,
+  updateAiConversation,
 } from "@/lib/ai/conversations";
 import { closeLiveSession } from "@/lib/ai/agent";
 import { getProjectDir, NoProjectSelectedError } from "@/lib/fs/project-dir";
@@ -25,6 +26,34 @@ export async function GET(req: Request) {
     const projectDir = getProjectDir();
     const id = new URL(req.url).searchParams.get("id") ?? MAIN_CONVERSATION_ID;
     const conversation = await readAiConversation(projectDir, id);
+    return NextResponse.json({ conversation });
+  } catch (error) {
+    return errorResponse(error);
+  }
+}
+
+/**
+ * Persists a model change straight away, so a picked model survives a
+ * reload even if the user never sends a message after switching. The switch
+ * itself reaches the running SDK session on the next turn (see
+ * runMyWikiChatTurn's applyModel) — nothing to do here but record it.
+ */
+export async function PATCH(req: Request) {
+  try {
+    const projectDir = getProjectDir();
+    const id = new URL(req.url).searchParams.get("id") ?? MAIN_CONVERSATION_ID;
+    const body = (await req.json().catch(() => ({}))) as { model?: string };
+    const model = body.model?.trim();
+
+    if (!model) {
+      return NextResponse.json({ error: "Missing model" }, { status: 400 });
+    }
+
+    const conversation = await updateAiConversation(
+      projectDir,
+      id,
+      async (current) => ({ ...current, model }),
+    );
     return NextResponse.json({ conversation });
   } catch (error) {
     return errorResponse(error);

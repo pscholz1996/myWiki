@@ -4,6 +4,7 @@ import type {
   AiConversation,
   AiConversationSummary,
   AiManifest,
+  AiModelOption,
   AiPlanUsage,
   AiRejectedSourceFile,
   AiSourceRecord,
@@ -187,12 +188,41 @@ export async function fetchConversationList(): Promise<
   return data.conversations;
 }
 
-export async function createConversation(): Promise<AiConversation> {
+export async function createConversation(
+  model?: string,
+): Promise<AiConversation> {
   const res = await fetch("/api/ai/conversations", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: "{}",
+    body: JSON.stringify(model ? { model } : {}),
   });
+  if (!res.ok) throw await errFrom(res);
+  const data = (await res.json()) as { conversation: AiConversation };
+  return data.conversation;
+}
+
+export async function fetchAiModels(): Promise<{
+  models: AiModelOption[];
+  defaultModel: string;
+}> {
+  return getJson<{ models: AiModelOption[]; defaultModel: string }>(
+    "/api/ai/models",
+  );
+}
+
+/** Records a model switch on an existing conversation right away. */
+export async function setConversationModel(
+  conversationId: string,
+  model: string,
+): Promise<AiConversation> {
+  const res = await fetch(
+    `/api/ai/conversation?id=${encodeURIComponent(conversationId)}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model }),
+    },
+  );
   if (!res.ok) throw await errFrom(res);
   const data = (await res.json()) as { conversation: AiConversation };
   return data.conversation;

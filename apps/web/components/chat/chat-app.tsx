@@ -5,6 +5,7 @@ import {
   ArrowUpIcon,
   BookmarkPlusIcon,
   CheckIcon,
+  ChevronDownIcon,
   CopyIcon,
   FolderOpenIcon,
   HistoryIcon,
@@ -38,6 +39,7 @@ import { ClaudeAccountMenu } from "@/components/account/claude-account-menu";
 import { DirectoryBrowserModal } from "@/components/project/directory-browser-modal";
 import { useAiStore } from "@/stores/ai-store";
 import type { AiMessage, AiPlanUsage } from "@/lib/ai/types";
+import { findModelOption } from "@/lib/ai/types";
 import { basename } from "@/lib/project/path-utils";
 import { AiMarkdown } from "./markdown";
 import { SourcesDialog } from "./sources-dialog";
@@ -225,6 +227,75 @@ function ThinkingIndicator() {
   );
 }
 
+/**
+ * Which Claude model answers the next message — the composer's counterpart
+ * to Claude Code's /model. Switching mid-conversation is fine: the SDK
+ * session is reconfigured in place, so the chat keeps its context.
+ */
+function ModelPicker({ disabled }: { disabled?: boolean }) {
+  const models = useAiStore((state) => state.models);
+  const selectedModel = useAiStore((state) => state.selectedModel);
+  const selectModel = useAiStore((state) => state.selectModel);
+
+  const active = findModelOption(models, selectedModel);
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          size="sm"
+          // Muted and small on purpose: it sits in the composer's footer
+          // next to the Claude byline, not as a primary action competing
+          // with Send.
+          className="-ml-1.5 h-7 gap-1 px-2 text-muted-foreground text-xs hover:text-foreground"
+          disabled={disabled}
+          title="Choose the model that answers"
+        >
+          {/* Falling back to the raw identifier keeps a model the list
+              doesn't know about (older conversation, plan change) visible
+              instead of showing a blank picker. */}
+          {active?.displayName ?? selectedModel}
+          <ChevronDownIcon className="size-3" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-72">
+        <DropdownMenuLabel className="text-xs">Modell</DropdownMenuLabel>
+        {models.map((model) => {
+          const isActive = model.value === active?.value;
+          return (
+            <DropdownMenuItem
+              key={model.value}
+              className="flex items-start gap-2"
+              onSelect={() => selectModel(model.value)}
+            >
+              <CheckIcon
+                className={`mt-0.5 size-3.5 shrink-0 ${isActive ? "" : "invisible"}`}
+              />
+              <div className="min-w-0 flex-1">
+                <div className={`text-sm ${isActive ? "font-medium" : ""}`}>
+                  {model.displayName}
+                  {/* Only in the menu, not on the trigger: the footer button
+                      should read "Sonnet", not repeat the recommendation on
+                      every screen. */}
+                  {model.recommended ? (
+                    <span className="ml-1 font-normal text-muted-foreground">
+                      (recommended)
+                    </span>
+                  ) : null}
+                </div>
+                <div className="text-muted-foreground text-xs">
+                  {model.description}
+                </div>
+              </div>
+            </DropdownMenuItem>
+          );
+        })}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 function Composer({
   draft,
   onDraftChange,
@@ -256,11 +327,13 @@ function Composer({
         }}
       />
       <div className="flex items-center justify-between px-3 pb-2.5">
-        <div className="flex items-center gap-1.5 text-muted-foreground text-xs">
+        <div className="flex min-w-0 items-center gap-1.5 text-muted-foreground text-xs">
           {/* Claude's own brand color — the surrounding text stays muted,
               but the logo itself shouldn't inherit that and go monochrome. */}
-          <SiClaude className="size-3.5" color="#D97757" />
-          Powered by Claude
+          <SiClaude className="size-3.5 shrink-0" color="#D97757" />
+          {/* Disabled mid-turn: the running turn is already committed to a
+              model, so offering the switch there would be a lie. */}
+          <ModelPicker disabled={sending} />
         </div>
         {sending ? (
           // While a turn runs, the send button becomes the stop button —
@@ -328,6 +401,7 @@ export function ChatApp({ current }: ChatAppProps) {
   const loadSources = useAiStore((state) => state.loadSources);
   const loadConversation = useAiStore((state) => state.loadConversation);
   const loadPlanUsage = useAiStore((state) => state.loadPlanUsage);
+  const loadModels = useAiStore((state) => state.loadModels);
   const conversations = useAiStore((state) => state.conversations);
   const loadConversations = useAiStore((state) => state.loadConversations);
   const startNewConversation = useAiStore(
@@ -361,8 +435,18 @@ export function ChatApp({ current }: ChatAppProps) {
       loadConversation(),
       loadPlanUsage(),
       loadConversations(),
+      // Slow on a cold server (spawns the CLI to ask what the plan allows),
+      // so it rides along with the rest of the mount rather than blocking
+      // the picker's first paint — the built-in list covers the gap.
+      loadModels(),
     ]);
-  }, [loadConversation, loadConversations, loadPlanUsage, loadSources]);
+  }, [
+    loadConversation,
+    loadConversations,
+    loadModels,
+    loadPlanUsage,
+    loadSources,
+  ]);
 
   useEffect(() => {
     if (error) toast.error(error);

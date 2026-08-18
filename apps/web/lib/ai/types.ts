@@ -64,11 +64,138 @@ export interface AiConversation {
   contextTokens?: number;
 }
 
-// Sonnet 5's context window (the only model this app currently requests).
-// Not derived from the SDK response because control-request methods like
-// getContextUsage() need a persistent streaming session; this is a static
-// fallback that's accurate as long as the app keeps defaulting to Sonnet 5.
+// Context window of the models this app offers — every current Claude model
+// in the picker is a 1M-context variant, so one figure covers them all. Not
+// derived from the SDK response because control-request methods like
+// getContextUsage() need a persistent streaming session.
 export const DEFAULT_CONTEXT_WINDOW_TOKENS = 1_000_000;
+
+/**
+ * One row of the model picker, mirroring the Claude Agent SDK's ModelInfo.
+ * `value` is what gets sent back as the model identifier — usually an alias
+ * ("sonnet", "opus[1m]", "default") rather than a wire id, exactly as the
+ * SDK reports it.
+ */
+export interface AiModelOption {
+  value: string;
+  /**
+   * Wire model id `value` resolves to (e.g. "sonnet" → "claude-sonnet-5").
+   * The only way to recognize a conversation that persisted an explicit id
+   * as belonging to one of the alias rows the SDK now returns.
+   */
+  resolvedModel?: string;
+  displayName: string;
+  description: string;
+  /**
+   * Set by toPickerOptions on the row the SDK's "default" row resolves to,
+   * i.e. the model Anthropic currently recommends. Only a label marker — the
+   * row still selects its own pinned model, never the moving "default".
+   */
+  recommended?: boolean;
+}
+
+/**
+ * The SDK's moving-target row: it resolves to whatever model Anthropic
+ * currently recommends instead of naming one.
+ */
+export const DEFAULT_MODEL_ALIAS = "default";
+
+// What the app requests when nothing else is chosen. Deliberately the wire
+// id rather than the "sonnet" alias: conversations created before the model
+// picker existed have exactly this string on disk, and keeping the default
+// identical means they don't silently change model on first open.
+export const DEFAULT_MODEL = "claude-sonnet-5";
+
+/**
+ * Shown when the SDK's own model list can't be reached (not logged in yet,
+ * CLI missing, offline). Enough to keep the picker usable rather than
+ * empty; the live list replaces it as soon as it arrives.
+ */
+export const FALLBACK_MODEL_OPTIONS: AiModelOption[] = [
+  {
+    value: "opus",
+    displayName: "Opus",
+    description: "Best for complex, multi-step research",
+  },
+  {
+    value: "sonnet",
+    resolvedModel: DEFAULT_MODEL,
+    displayName: "Sonnet",
+    description: "Efficient for routine questions",
+  },
+  {
+    value: "haiku",
+    displayName: "Haiku",
+    description: "Fastest for quick answers",
+  },
+];
+
+/**
+ * Turns the SDK's raw model list into the rows the picker shows.
+ *
+ * The SDK reports a "default" row alongside the pinned row it currently
+ * resolves to — two entries for one model, which reads as a choice but
+ * isn't. So the "default" row is dropped and the pinned row it points at is
+ * marked `recommended` instead: same information, one row, and the marker
+ * moves on its own the day the recommendation does.
+ *
+ * The drop is deliberately conditional. If "default" ever resolves to a
+ * model that has no row of its own, it's the only way to reach that model
+ * and stays in the list rather than silently disappearing.
+ */
+export function toPickerOptions(options: AiModelOption[]): AiModelOption[] {
+  const fallback = options.find(
+    (option) => option.value === DEFAULT_MODEL_ALIAS,
+  );
+  const recommends = fallback?.resolvedModel ?? DEFAULT_MODEL;
+
+  const pinned = options.find(
+    (option) =>
+      option.value !== DEFAULT_MODEL_ALIAS &&
+      (option.value === recommends || option.resolvedModel === recommends),
+  );
+  if (!pinned) return options;
+
+  return options
+    .filter((option) => option.value !== DEFAULT_MODEL_ALIAS)
+    .map((option) =>
+      option === pinned ? { ...option, recommended: true } : option,
+    );
+}
+
+/**
+ * The picker row a stored model string belongs to. Matches on the row's own
+ * `value` first, then on `resolvedModel` so a conversation holding the wire
+ * id "claude-sonnet-5" still highlights the "Sonnet" row.
+ *
+ * The "default" row is deliberately the last resort when matching by
+ * `resolvedModel`: it currently resolves to whatever Anthropic recommends,
+ * which is not the same promise as an explicitly pinned model. Preferring
+ * it would show "Default (recommended)" for a conversation that is in fact
+ * pinned to Sonnet — and then silently change model the day the
+ * recommendation moves.
+ *
+ * A stored "default" resolves to the recommended row, because toPickerOptions
+ * removes the "default" row: conversations that picked it before still have
+ * the string on disk and would otherwise land on no row at all.
+ */
+export function findModelOption(
+  options: AiModelOption[],
+  model: string | undefined,
+): AiModelOption | undefined {
+  if (!model) return undefined;
+  return (
+    options.find((option) => option.value === model) ??
+    options.find(
+      (option) =>
+        option.resolvedModel === model && option.value !== DEFAULT_MODEL_ALIAS,
+    ) ??
+    options.find((option) => option.resolvedModel === model) ??
+    (model === DEFAULT_MODEL_ALIAS
+      ? options.find((option) => option.recommended)
+      : undefined)
+  );
+}
 
 // The id of the legacy single conversation, kept as the fallback when a
 // chat request names no conversation — pre-multi-conversation clients and
