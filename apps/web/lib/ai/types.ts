@@ -197,6 +197,44 @@ export function findModelOption(
   );
 }
 
+/**
+ * The empty state's subtitle reads "Answers drawn from your N sources — TAIL".
+ * The count is computed from the manifest, never written by the model, so the
+ * one factual claim in the sentence can't be hallucinated; only this closing
+ * clause is up for generation.
+ */
+export const DEFAULT_TAGLINE_TAIL =
+  "with tables, equations, and diagrams when they help.";
+
+/** How long a generated clause may be before it stops fitting on one line. */
+const MAX_TAGLINE_TAIL = 80;
+
+/**
+ * Makes a model's reply usable as that closing clause, or rejects it.
+ *
+ * The model is asked for one bare clause, and mostly obliges — but it also
+ * wraps it in quotes, prefixes the dash it was shown in the template, or
+ * answers in two lines. Rather than trust the instruction, take the first
+ * line, strip the decorations, and require the result to be short and plain;
+ * anything else is dropped in favour of the default, because a broken
+ * subtitle is worse than a generic one.
+ */
+export function sanitizeTaglineTail(raw: string): string | null {
+  const tail = raw
+    .split("\n")[0]
+    .trim()
+    .replace(/^["'`«»\s]+|["'`«»\s]+$/g, "")
+    .replace(/^[—–-]\s*/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!tail || tail.length > MAX_TAGLINE_TAIL) return null;
+  // Markdown, bullets or a second sentence mean it ignored the brief.
+  if (/[*_#`|[\]<>]/.test(tail)) return null;
+
+  return /[.!?]$/.test(tail) ? tail : `${tail}.`;
+}
+
 // The id of the legacy single conversation, kept as the fallback when a
 // chat request names no conversation — pre-multi-conversation clients and
 // existing on-disk conversations keep working unchanged.

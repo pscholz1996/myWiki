@@ -40,7 +40,8 @@ import { MyWikiLogo } from "@/components/brand/mywiki-logo";
 import { DirectoryBrowserModal } from "@/components/project/directory-browser-modal";
 import { useAiStore } from "@/stores/ai-store";
 import type { AiMessage, AiPlanUsage } from "@/lib/ai/types";
-import { findModelOption } from "@/lib/ai/types";
+import { DEFAULT_TAGLINE_TAIL, findModelOption } from "@/lib/ai/types";
+import { fetchProjectTagline } from "@/lib/ai/ai-client";
 import { basename } from "@/lib/project/path-utils";
 import packageJson from "@/package.json";
 import { AiMarkdown } from "./markdown";
@@ -474,6 +475,28 @@ export function ChatApp({ current }: ChatAppProps) {
     loadSources,
   ]);
 
+  // The subtitle's closing clause, written by the AI from the library's own
+  // titles. Fetched only while the empty state is on screen and only once per
+  // source set (the route caches on the same key), because it costs a real —
+  // if cheap — model turn and is pure decoration: until it arrives, and
+  // whenever it can't be produced, DEFAULT_TAGLINE_TAIL stands in.
+  const [tagline, setTagline] = useState<string | null>(null);
+  const sourceKey = sources
+    .map((source) => source.id)
+    .sort()
+    .join("|");
+
+  useEffect(() => {
+    if (hasMessages || !sourceKey) return;
+    let cancelled = false;
+    void fetchProjectTagline().then((tail) => {
+      if (!cancelled) setTagline(tail);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [hasMessages, sourceKey]);
+
   useEffect(() => {
     if (error) toast.error(error);
   }, [error]);
@@ -755,7 +778,7 @@ export function ChatApp({ current }: ChatAppProps) {
               </h1>
               <p className="text-muted-foreground text-sm">
                 {sources.length > 0
-                  ? `Answers drawn from your ${sources.length} source${sources.length === 1 ? "" : "s"} — with tables, equations, and diagrams when they help.`
+                  ? `Answers drawn from your ${sources.length} source${sources.length === 1 ? "" : "s"} — ${tagline ?? DEFAULT_TAGLINE_TAIL}`
                   : "Add sources to give myWiki something to know, or just ask away."}
               </p>
             </div>

@@ -282,6 +282,16 @@ export async function streamAiChat(
   });
 }
 
+/**
+ * The project-specific tail of the empty state's subtitle, or null to keep
+ * the default. Never throws: the caller renders copy, not an error state.
+ */
+export async function fetchProjectTagline(): Promise<string | null> {
+  return getJson<{ tagline: string | null }>("/api/ai/tagline")
+    .then((data) => data.tagline)
+    .catch(() => null);
+}
+
 // null before the first message of a server run (no live SDK session yet
 // to ask) — not an error, just "not available yet".
 export async function fetchPlanUsage(): Promise<AiPlanUsage | null> {
