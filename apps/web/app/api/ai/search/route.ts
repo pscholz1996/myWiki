@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getProjectDir, NoProjectSelectedError } from "@/lib/fs/project-dir";
 import { resolveKbRef } from "@/lib/project/kb-registry";
-import { searchAiKnowledgeBase } from "@/lib/ai/knowledge-base";
+import { listAiSources, searchAiKnowledgeBase } from "@/lib/ai/knowledge-base";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -40,7 +40,18 @@ export async function POST(req: Request) {
 
     const hits = await searchAiKnowledgeBase(projectDir, query, body.topK ?? 5);
 
-    return NextResponse.json({ query, hits });
+    // chunk.sourceFile is the internal stored path (uuid.pdf) — external
+    // callers need the human-readable name for citations.
+    const manifest = await listAiSources(projectDir);
+    const namesById = new Map(
+      manifest.sources.map((s) => [s.id, s.originalName]),
+    );
+    const enriched = hits.map((hit) => ({
+      ...hit,
+      source: namesById.get(hit.chunk.sourceId) ?? hit.chunk.sourceFile,
+    }));
+
+    return NextResponse.json({ query, hits: enriched });
   } catch (error) {
     if (error instanceof NoProjectSelectedError) {
       return NextResponse.json(
