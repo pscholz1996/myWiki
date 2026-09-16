@@ -114,3 +114,18 @@ export function setCurrentProject(absPath: string): void {
 export function getRecentProjects(): string[] {
   return getConfig().recentProjects.filter((p) => isDirectory(p));
 }
+
+/**
+ * Drops a path from recentProjects. Only the registry entry is removed —
+ * the folder on disk (including its .mywiki data) stays untouched. If the
+ * removed path happens to be the current project, that is cleared too so
+ * the config never points at a KB the user asked to forget.
+ */
+export function forgetRecentProject(absPath: string): void {
+  const resolved = path.resolve(absPath.trim());
+  const cfg = getConfig();
+  writeConfig({
+    currentProject: cfg.currentProject === resolved ? null : cfg.currentProject,
+    recentProjects: cfg.recentProjects.filter((p) => p !== resolved),
+  });
+}

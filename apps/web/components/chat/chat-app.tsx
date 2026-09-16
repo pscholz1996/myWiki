@@ -22,6 +22,7 @@ import {
   SunIcon,
   Trash2Icon,
   TriangleAlertIcon,
+  XIcon,
 } from "lucide-react";
 import { SiClaude, SiGithub } from "@icons-pack/react-simple-icons";
 import { useTheme } from "next-themes";
@@ -410,6 +411,22 @@ async function switchWikiFolder(path: string): Promise<void> {
   window.location.reload();
 }
 
+async function forgetKb(path: string): Promise<void> {
+  try {
+    const res = await fetch("/api/project/forget", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    window.location.reload();
+  } catch (error) {
+    toast.error(
+      error instanceof Error ? error.message : "Failed to remove entry",
+    );
+  }
+}
+
 interface ChatAppProps {
   current: string;
   currentName: string | null;
@@ -727,6 +744,7 @@ export function ChatApp({ current, currentName, recent }: ChatAppProps) {
                   {otherKbs.map((kb) => (
                     <DropdownMenuItem
                       key={kb.path}
+                      className="group"
                       onSelect={() =>
                         void switchWikiFolder(kb.path).catch((error) =>
                           toast.error(
@@ -739,11 +757,22 @@ export function ChatApp({ current, currentName, recent }: ChatAppProps) {
                     >
                       <FolderIcon className="mr-2 size-4 shrink-0" />
                       <span className="min-w-0 flex-1 truncate">{kb.name}</span>
-                      <span className="ml-2 shrink-0 text-muted-foreground text-xs tabular-nums">
+                      <span className="ml-2 shrink-0 text-muted-foreground text-xs tabular-nums group-hover:hidden">
                         {kb.sourceCount > 0
                           ? `${kb.sourceCount} ${kb.sourceCount === 1 ? "source" : "sources"}`
                           : "empty"}
                       </span>
+                      <button
+                        title="Remove from this list (folder stays untouched)"
+                        className="ml-2 hidden shrink-0 text-muted-foreground hover:text-foreground group-hover:block"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          e.preventDefault();
+                          void forgetKb(kb.path);
+                        }}
+                      >
+                        <XIcon className="size-4" />
+                      </button>
                     </DropdownMenuItem>
                   ))}
                 </>

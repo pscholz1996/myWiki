@@ -2,7 +2,12 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
-import { FolderOpenIcon, FolderIcon, FolderPlusIcon } from "lucide-react";
+import {
+  FolderOpenIcon,
+  FolderIcon,
+  FolderPlusIcon,
+  XIcon,
+} from "lucide-react";
 import { SiGithub } from "@icons-pack/react-simple-icons";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -51,6 +56,22 @@ export function WelcomeScreen({ recent }: WelcomeScreenProps) {
       );
     } finally {
       if (!succeeded) setSubmitting(false);
+    }
+  };
+
+  const onForget = async (p: string) => {
+    try {
+      const res = await fetch("/api/project/forget", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: p }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      window.location.reload();
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Failed to remove entry",
+      );
     }
   };
 
@@ -123,11 +144,11 @@ export function WelcomeScreen({ recent }: WelcomeScreenProps) {
               </h2>
               <ul className="divide-y rounded-md border">
                 {recent.map((kb) => (
-                  <li key={kb.path}>
+                  <li key={kb.path} className="group flex items-center">
                     <button
                       onClick={() => void onOpen(kb.path)}
                       disabled={submitting}
-                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-accent disabled:opacity-50"
+                      className="flex min-w-0 flex-1 items-center gap-2 px-3 py-2 text-left text-sm hover:bg-accent disabled:opacity-50"
                     >
                       <FolderIcon className="size-4 shrink-0 text-muted-foreground" />
                       <span className="truncate font-medium">{kb.name}</span>
@@ -140,6 +161,14 @@ export function WelcomeScreen({ recent }: WelcomeScreenProps) {
                       <span className="ml-auto truncate text-muted-foreground text-xs">
                         {kb.path}
                       </span>
+                    </button>
+                    <button
+                      onClick={() => void onForget(kb.path)}
+                      disabled={submitting}
+                      title="Remove from this list (folder stays untouched)"
+                      className="shrink-0 p-2 text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 disabled:opacity-50 group-hover:opacity-100"
+                    >
+                      <XIcon className="size-4" />
                     </button>
                   </li>
                 ))}

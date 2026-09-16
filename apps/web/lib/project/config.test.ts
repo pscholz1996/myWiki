@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import {
   _setConfigPathForTesting,
+  forgetRecentProject,
   getConfig,
   getRecentProjects,
   readCurrentProject,
@@ -160,6 +161,39 @@ describe("setCurrentProject", () => {
     expect(
       fs.existsSync(path.join(tmpDir, "nested", "dir", "config.json")),
     ).toBe(true);
+  });
+});
+
+describe("forgetRecentProject", () => {
+  test("removes the entry but keeps the folder on disk", () => {
+    const a = fs.mkdtempSync(path.join(os.tmpdir(), "forget-a-"));
+    try {
+      setCurrentProject(a);
+      setCurrentProject(tmpDir);
+      forgetRecentProject(a);
+      const saved = JSON.parse(fs.readFileSync(configPath, "utf8"));
+      expect(saved.recentProjects).toEqual([tmpDir]);
+      expect(saved.currentProject).toBe(tmpDir);
+      expect(fs.existsSync(a)).toBe(true);
+    } finally {
+      fs.rmSync(a, { recursive: true, force: true });
+    }
+  });
+
+  test("clears currentProject when the forgotten path is current", () => {
+    setCurrentProject(tmpDir);
+    forgetRecentProject(tmpDir);
+    const saved = JSON.parse(fs.readFileSync(configPath, "utf8"));
+    expect(saved.currentProject).toBeNull();
+    expect(saved.recentProjects).toEqual([]);
+  });
+
+  test("is a no-op for a path that is not registered", () => {
+    setCurrentProject(tmpDir);
+    forgetRecentProject(path.join(tmpDir, "never-registered"));
+    const saved = JSON.parse(fs.readFileSync(configPath, "utf8"));
+    expect(saved.currentProject).toBe(tmpDir);
+    expect(saved.recentProjects).toEqual([tmpDir]);
   });
 });
 
