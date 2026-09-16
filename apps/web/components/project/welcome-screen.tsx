@@ -9,11 +9,11 @@ import { Input } from "@/components/ui/input";
 import { MyWikiLogo } from "@/components/brand/mywiki-logo";
 import { DirectoryBrowserModal } from "./directory-browser-modal";
 import { NewProjectDialog } from "./new-project-dialog";
-import { basename } from "@/lib/project/path-utils";
+import type { KnownKb } from "@/lib/project/kb-registry";
 import packageJson from "@/package.json";
 
 interface WelcomeScreenProps {
-  recent: string[];
+  recent: KnownKb[];
 }
 
 async function selectProject(path: string): Promise<void> {
@@ -119,22 +119,26 @@ export function WelcomeScreen({ recent }: WelcomeScreenProps) {
           {recent.length > 0 && (
             <div className="space-y-2">
               <h2 className="font-medium text-muted-foreground text-sm">
-                Recent folders
+                Your knowledge bases
               </h2>
               <ul className="divide-y rounded-md border">
-                {recent.map((p) => (
-                  <li key={p}>
+                {recent.map((kb) => (
+                  <li key={kb.path}>
                     <button
-                      onClick={() => void onOpen(p)}
+                      onClick={() => void onOpen(kb.path)}
                       disabled={submitting}
                       className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-accent disabled:opacity-50"
                     >
                       <FolderIcon className="size-4 shrink-0 text-muted-foreground" />
-                      <span className="truncate font-medium">
-                        {basename(p)}
-                      </span>
+                      <span className="truncate font-medium">{kb.name}</span>
+                      {kb.sourceCount > 0 && (
+                        <span className="shrink-0 rounded-full bg-muted px-1.5 text-muted-foreground text-xs tabular-nums">
+                          {kb.sourceCount}{" "}
+                          {kb.sourceCount === 1 ? "source" : "sources"}
+                        </span>
+                      )}
                       <span className="ml-auto truncate text-muted-foreground text-xs">
-                        {p}
+                        {kb.path}
                       </span>
                     </button>
                   </li>

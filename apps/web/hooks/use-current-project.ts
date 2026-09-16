@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import type { KnownKb } from "@/lib/project/kb-registry";
 
 export interface CurrentProjectState {
   current: string | null;
-  recent: string[];
+  currentName: string | null;
+  recent: KnownKb[];
   loading: boolean;
   error: string | null;
 }
@@ -12,6 +14,7 @@ export interface CurrentProjectState {
 export function useCurrentProject(): CurrentProjectState {
   const [state, setState] = useState<CurrentProjectState>({
     current: null,
+    currentName: null,
     recent: [],
     loading: true,
     error: null,
@@ -24,13 +27,15 @@ export function useCurrentProject(): CurrentProjectState {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json() as Promise<{
           current: string | null;
-          recent: string[];
+          currentName: string | null;
+          recent: KnownKb[];
         }>;
       })
       .then((data) => {
         if (cancelled) return;
         setState({
           current: data.current,
+          currentName: data.currentName,
           recent: data.recent,
           loading: false,
           error: null,

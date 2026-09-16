@@ -5,7 +5,7 @@ import { WelcomeScreen } from "@/components/project/welcome-screen";
 import { useCurrentProject } from "@/hooks/use-current-project";
 
 export default function Home() {
-  const { current, recent, loading, error } = useCurrentProject();
+  const { current, currentName, recent, loading, error } = useCurrentProject();
 
   if (loading) {
     return (
@@ -33,7 +33,7 @@ export default function Home() {
 
   return (
     <main className="h-full">
-      <ChatApp current={current} />
+      <ChatApp current={current} currentName={currentName} recent={recent} />
     </main>
   );
 }

@@ -7,6 +7,7 @@ import {
   CheckIcon,
   ChevronDownIcon,
   CopyIcon,
+  FolderIcon,
   FolderOpenIcon,
   HistoryIcon,
   LibraryBigIcon,
@@ -14,6 +15,7 @@ import {
   MonitorIcon,
   MoonIcon,
   MoreHorizontalIcon,
+  PencilIcon,
   ShieldCheckIcon,
   SquareIcon,
   SquarePenIcon,
@@ -38,6 +40,8 @@ import { TooltipIconButton } from "@/components/ui/tooltip-icon-button";
 import { ClaudeAccountMenu } from "@/components/account/claude-account-menu";
 import { MyWikiLogo } from "@/components/brand/mywiki-logo";
 import { DirectoryBrowserModal } from "@/components/project/directory-browser-modal";
+import { RenameKbDialog } from "@/components/project/rename-kb-dialog";
+import type { KnownKb } from "@/lib/project/kb-registry";
 import { useAiStore } from "@/stores/ai-store";
 import type { AiMessage, AiPlanUsage } from "@/lib/ai/types";
 import { DEFAULT_TAGLINE_TAIL, findModelOption } from "@/lib/ai/types";
@@ -408,13 +412,17 @@ async function switchWikiFolder(path: string): Promise<void> {
 
 interface ChatAppProps {
   current: string;
+  currentName: string | null;
+  recent: KnownKb[];
 }
 
-export function ChatApp({ current }: ChatAppProps) {
+export function ChatApp({ current, currentName, recent }: ChatAppProps) {
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const [draft, setDraft] = useState("");
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const [browseOpen, setBrowseOpen] = useState(false);
+  const [renameOpen, setRenameOpen] = useState(false);
+  const otherKbs = recent.filter((kb) => kb.path !== current);
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
@@ -698,9 +706,49 @@ export function ChatApp({ current }: ChatAppProps) {
               <DropdownMenuLabel className="text-xs">Usage</DropdownMenuLabel>
               <UsageRows planUsage={planUsage} />
               <DropdownMenuSeparator />
-              <DropdownMenuLabel className="truncate font-mono text-muted-foreground text-xs">
-                {current}
+              <DropdownMenuLabel className="flex min-w-0 flex-col gap-0.5">
+                <span className="truncate">
+                  {currentName ?? basename(current)}
+                </span>
+                <span className="truncate font-mono font-normal text-muted-foreground text-xs">
+                  {current}
+                </span>
               </DropdownMenuLabel>
+              <DropdownMenuItem onSelect={() => setRenameOpen(true)}>
+                <PencilIcon className="mr-2 size-4" />
+                Rename knowledge base…
+              </DropdownMenuItem>
+              {otherKbs.length > 0 && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuLabel className="text-muted-foreground text-xs">
+                    Switch knowledge base
+                  </DropdownMenuLabel>
+                  {otherKbs.map((kb) => (
+                    <DropdownMenuItem
+                      key={kb.path}
+                      onSelect={() =>
+                        void switchWikiFolder(kb.path).catch((error) =>
+                          toast.error(
+                            error instanceof Error
+                              ? error.message
+                              : "Failed to switch folder",
+                          ),
+                        )
+                      }
+                    >
+                      <FolderIcon className="mr-2 size-4 shrink-0" />
+                      <span className="min-w-0 flex-1 truncate">{kb.name}</span>
+                      <span className="ml-2 shrink-0 text-muted-foreground text-xs tabular-nums">
+                        {kb.sourceCount > 0
+                          ? `${kb.sourceCount} ${kb.sourceCount === 1 ? "source" : "sources"}`
+                          : "empty"}
+                      </span>
+                    </DropdownMenuItem>
+                  ))}
+                </>
+              )}
+              <DropdownMenuSeparator />
               <DropdownMenuItem onSelect={() => setBrowseOpen(true)}>
                 <FolderOpenIcon className="mr-2 size-4" />
                 Change knowledge folder…
@@ -790,6 +838,12 @@ export function ChatApp({ current }: ChatAppProps) {
       <RepoLink />
 
       <SourcesDialog open={sourcesOpen} onOpenChange={setSourcesOpen} />
+      <RenameKbDialog
+        open={renameOpen}
+        onClose={() => setRenameOpen(false)}
+        path={current}
+        currentName={currentName ?? basename(current)}
+      />
       <DirectoryBrowserModal
         open={browseOpen}
         onClose={() => setBrowseOpen(false)}
