@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { ensureAiWorkspace } from "@/lib/ai/knowledge-base";
+import { DEFAULT_MODEL } from "@/lib/ai/types";
 import type {
   AiConversation,
   AiConversationSummary,
@@ -110,7 +111,7 @@ export async function createAiConversation(params: {
 }): Promise<AiConversation> {
   const conversation: AiConversation = {
     id: params.conversationId,
-    model: params.model ?? "claude-sonnet-5",
+    model: params.model ?? DEFAULT_MODEL,
     sdkSessionId: params.sdkSessionId,
     messages: [],
     sourceIds: params.sourceIds ?? [],

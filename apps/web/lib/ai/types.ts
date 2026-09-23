@@ -100,11 +100,12 @@ export interface AiModelOption {
  */
 export const DEFAULT_MODEL_ALIAS = "default";
 
-// What the app requests when nothing else is chosen. Deliberately the wire
-// id rather than the "sonnet" alias: conversations created before the model
-// picker existed have exactly this string on disk, and keeping the default
-// identical means they don't silently change model on first open.
-export const DEFAULT_MODEL = "claude-sonnet-5";
+// What the app requests when nothing else is chosen. Deliberately a wire id
+// rather than the "opus" alias: this string is persisted with a conversation,
+// and an alias would silently repoint an old conversation at a different
+// model the day Anthropic moves it. Pinning the id means a conversation keeps
+// answering with the model it was started on.
+export const DEFAULT_MODEL = "claude-opus-5-5";
 
 /**
  * Shown when the SDK's own model list can't be reached (not logged in yet,
@@ -114,12 +115,13 @@ export const DEFAULT_MODEL = "claude-sonnet-5";
 export const FALLBACK_MODEL_OPTIONS: AiModelOption[] = [
   {
     value: "opus",
+    resolvedModel: DEFAULT_MODEL,
     displayName: "Opus",
     description: "Best for complex, multi-step research",
   },
   {
     value: "sonnet",
-    resolvedModel: DEFAULT_MODEL,
+    resolvedModel: "claude-sonnet-5",
     displayName: "Sonnet",
     description: "Efficient for routine questions",
   },

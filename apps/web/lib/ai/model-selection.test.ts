@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
+  DEFAULT_MODEL,
   findModelOption,
   toPickerOptions,
   type AiConversation,
@@ -296,9 +297,16 @@ describe("toPickerOptions", () => {
   });
 
   // The offline fallback list has no "default" row at all, and still needs
-  // the recommended marker on the model the app asks for by default.
+  // the recommended marker on the model the app asks for by default. The
+  // row is built from DEFAULT_MODEL rather than a literal id, so this keeps
+  // testing the behaviour instead of whichever model the default happens to
+  // be — pinning the literal is what broke it when the default moved to
+  // Opus 5.5.
   test('marks the app default when the list has no "default" row', () => {
-    const marked = toPickerOptions([options[1], options[2]]);
+    const marked = toPickerOptions([
+      { ...options[1], resolvedModel: DEFAULT_MODEL },
+      options[2],
+    ]);
     expect(
       marked.map((option) => [option.value, option.recommended === true]),
     ).toEqual([
