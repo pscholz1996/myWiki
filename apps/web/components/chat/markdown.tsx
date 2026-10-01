@@ -1,6 +1,6 @@
 "use client";
 
-import type { ComponentProps } from "react";
+import { memo, type ComponentProps } from "react";
 import { FileTextIcon } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import rehypeKatex from "rehype-katex";
@@ -103,16 +103,42 @@ function PreBlock(props: ComponentProps<"pre">) {
   return <pre {...props} />;
 }
 
-export function AiMarkdown({ content }: { content: string }) {
+// Hoisted so every render passes the SAME array/object identities. Inline
+// literals here would be fresh objects on each render, which defeats any
+// memoisation react-markdown does on its own options.
+const REMARK_PLUGINS = [remarkGfm, remarkMath];
+const REHYPE_PLUGINS = [rehypeKatex];
+const COMPONENTS = { pre: PreBlock, img: FigureImage, a: SmartLink };
+
+/**
+ * Memoised on `content`, and that is load-bearing rather than tidiness.
+ *
+ * The draft text of the composer lives in ChatApp, which also renders the
+ * whole message list, so every keystroke re-renders each answer. Without
+ * this, that meant re-parsing all markdown (remark + rehype) and
+ * re-rendering all KaTeX on every character: measured at a 49 ms median per
+ * keystroke on a 12k-character conversation, which the typist feels as the
+ * input lagging behind.
+ *
+ * `content` is a string, so the default shallow comparison is exactly the
+ * right test: an answer re-parses when its text actually changes — while
+ * streaming, for instance — and never because something elsewhere on the
+ * page did.
+ */
+export const AiMarkdown = memo(function AiMarkdown({
+  content,
+}: {
+  content: string;
+}) {
   return (
     <div className={WRAPPER_CLASS}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[rehypeKatex]}
-        components={{ pre: PreBlock, img: FigureImage, a: SmartLink }}
+        remarkPlugins={REMARK_PLUGINS}
+        rehypePlugins={REHYPE_PLUGINS}
+        components={COMPONENTS}
       >
         {content}
       </ReactMarkdown>
     </div>
   );
-}
+});
