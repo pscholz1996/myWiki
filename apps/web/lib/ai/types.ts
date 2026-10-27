@@ -48,6 +48,14 @@ export interface AiConversation {
   title?: string;
   model: string;
   sdkSessionId?: string;
+  /**
+   * How many of `messages` the Claude session behind sdkSessionId has seen,
+   * set after each Claude turn. A conversation can switch between the
+   * institute LLM and Claude; Claude's session only remembers its own
+   * turns, so the messages past this count are handed to it as history on
+   * its next turn. Absent on conversations that predate the switch.
+   */
+  claudeSeenCount?: number;
   messages: AiMessage[];
   sourceIds: string[];
   updatedAt: string;
@@ -92,6 +100,29 @@ export interface AiModelOption {
    * row still selects its own pinned model, never the moving "default".
    */
   recommended?: boolean;
+  /** Which backend answers when this row is chosen; the picker groups by it. */
+  provider?: ModelProvider;
+}
+
+/**
+ * The two backends a chat can run on. "institute" is the institute's own
+ * LLM server (answers stay in-house); "claude" is Anthropic's cloud.
+ */
+export type ModelProvider = "institute" | "claude";
+
+/**
+ * Which backend a stored or requested model string belongs to.
+ *
+ * Claude strings are recognizable — the SDK's aliases ("opus", "sonnet[1m]",
+ * "default") and wire ids ("claude-opus-5-5"). Everything else is the
+ * institute: its alias, the id it reported ("google/gemma-4-31B-it"), and
+ * anything unknown, so that a conversation never leaves the house without
+ * the user having picked a Claude model.
+ */
+export function modelProvider(model: string | undefined): ModelProvider {
+  return model && /^(claude-|opus|sonnet|haiku|fable|default)/i.test(model)
+    ? "claude"
+    : "institute";
 }
 
 /**
@@ -108,16 +139,49 @@ export const DEFAULT_MODEL_ALIAS = "default";
 export const DEFAULT_MODEL = "institute";
 
 /**
- * Shown before the live list arrives and whenever the institute server
- * can't be reached (no VPN). One row, because there is one server and it
- * serves one model at a time.
+ * The Claude rows when the CLI's own list can't be had (not signed in yet,
+ * offline). The same three the picker showed before the institute LLM
+ * arrived; the live list replaces them as soon as it is available.
  */
-export const FALLBACK_MODEL_OPTIONS: AiModelOption[] = [
+export const CLAUDE_FALLBACK_OPTIONS: AiModelOption[] = [
   {
-    value: DEFAULT_MODEL,
-    displayName: "Institute LLM",
-    description: "IEM server · answers stay in-house",
+    value: "opus",
+    resolvedModel: "claude-opus-5-5",
+    displayName: "Opus",
+    description: "Best for complex, multi-step research",
+    provider: "claude",
   },
+  {
+    value: "sonnet",
+    resolvedModel: "claude-sonnet-5",
+    displayName: "Sonnet",
+    description: "Efficient for routine questions",
+    provider: "claude",
+  },
+  {
+    value: "haiku",
+    displayName: "Haiku",
+    description: "Fastest for quick answers",
+    provider: "claude",
+  },
+];
+
+/**
+ * The institute row before its live name arrives, or while the server can't
+ * be reached (no VPN). One row: the server serves one model at a time.
+ */
+export const INSTITUTE_FALLBACK_OPTION: AiModelOption = {
+  value: DEFAULT_MODEL,
+  displayName: "Institute LLM",
+  // The picker's group heading already says the answers stay in-house.
+  description: "IEM server",
+  provider: "institute",
+};
+
+/** The picker before (or without) the live lists. */
+export const FALLBACK_MODEL_OPTIONS: AiModelOption[] = [
+  INSTITUTE_FALLBACK_OPTION,
+  ...CLAUDE_FALLBACK_OPTIONS,
 ];
 
 /**

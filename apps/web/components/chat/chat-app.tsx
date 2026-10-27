@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   ArrowUpIcon,
+  Building2Icon,
   BookmarkPlusIcon,
   CheckIcon,
   ChevronDownIcon,
@@ -44,8 +45,17 @@ import { DirectoryBrowserModal } from "@/components/project/directory-browser-mo
 import { RenameKbDialog } from "@/components/project/rename-kb-dialog";
 import type { KnownKb } from "@/lib/project/kb-registry";
 import { useAiStore } from "@/stores/ai-store";
-import type { AiMessage, AiPlanUsage } from "@/lib/ai/types";
-import { DEFAULT_TAGLINE_TAIL, findModelOption } from "@/lib/ai/types";
+import type {
+  AiMessage,
+  AiModelOption,
+  AiPlanUsage,
+  ModelProvider,
+} from "@/lib/ai/types";
+import {
+  DEFAULT_TAGLINE_TAIL,
+  findModelOption,
+  modelProvider,
+} from "@/lib/ai/types";
 import { fetchProjectTagline } from "@/lib/ai/ai-client";
 import { basename } from "@/lib/project/path-utils";
 import packageJson from "@/package.json";
@@ -235,10 +245,31 @@ function ThinkingIndicator() {
   );
 }
 
+/** Who answers: Claude's own mark, or a neutral building for the institute. */
+function ProviderIcon({ provider }: { provider: ModelProvider }) {
+  return provider === "claude" ? (
+    // Claude's brand color — the surrounding text stays muted, but the logo
+    // itself shouldn't inherit that and go monochrome.
+    <SiClaude className="size-3.5 shrink-0" color="#D97757" />
+  ) : (
+    <Building2Icon className="size-3.5 shrink-0" />
+  );
+}
+
+const PROVIDER_GROUPS: Array<{ provider: ModelProvider; label: string }> = [
+  { provider: "institute", label: "Institute · answers stay in-house" },
+  { provider: "claude", label: "Claude · cloud" },
+];
+
 /**
- * Which Claude model answers the next message — the composer's counterpart
- * to Claude Code's /model. Switching mid-conversation is fine: the SDK
- * session is reconfigured in place, so the chat keeps its context.
+ * Which model answers the next message: the institute's own LLM or one of
+ * the Claude models — the composer's counterpart to Claude Code's /model.
+ * Switching mid-conversation is fine in either direction: Claude's session
+ * is reconfigured in place, and turns it missed are handed over as history.
+ *
+ * Grouped by provider, because the choice is not only about capability: it
+ * decides whether the question and the library excerpts leave the
+ * institute. That boundary has to be visible where the choice is made.
  */
 function ModelPicker({ disabled }: { disabled?: boolean }) {
   const models = useAiStore((state) => state.models);
@@ -246,6 +277,7 @@ function ModelPicker({ disabled }: { disabled?: boolean }) {
   const selectModel = useAiStore((state) => state.selectModel);
 
   const active = findModelOption(models, selectedModel);
+  const activeProvider = active?.provider ?? modelProvider(selectedModel);
 
   return (
     <DropdownMenu>
@@ -253,13 +285,13 @@ function ModelPicker({ disabled }: { disabled?: boolean }) {
         <Button
           variant="ghost"
           size="sm"
-          // Muted and small on purpose: it sits in the composer's footer
-          // next to the Claude byline, not as a primary action competing
-          // with Send.
-          className="-ml-1.5 h-7 gap-1 px-2 text-muted-foreground text-xs hover:text-foreground"
+          // Muted and small on purpose: it sits in the composer's footer,
+          // not as a primary action competing with Send.
+          className="-ml-1.5 h-7 gap-1.5 px-2 text-muted-foreground text-xs hover:text-foreground"
           disabled={disabled}
           title="Choose the model that answers"
         >
+          <ProviderIcon provider={activeProvider} />
           {/* Falling back to the raw identifier keeps a model the list
               doesn't know about (older conversation, plan change) visible
               instead of showing a blank picker. */}
@@ -268,40 +300,57 @@ function ModelPicker({ disabled }: { disabled?: boolean }) {
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-72">
-        <DropdownMenuLabel className="text-xs">Modell</DropdownMenuLabel>
-        {models.map((model) => {
-          const isActive = model.value === active?.value;
+        {PROVIDER_GROUPS.map(({ provider, label }, groupIndex) => {
+          const rows = models.filter(
+            (model) =>
+              (model.provider ?? modelProvider(model.value)) === provider,
+          );
+          if (rows.length === 0) return null;
           return (
-            <DropdownMenuItem
-              key={model.value}
-              className="flex items-start gap-2"
-              onSelect={() => selectModel(model.value)}
-            >
-              <CheckIcon
-                className={`mt-0.5 size-3.5 shrink-0 ${isActive ? "" : "invisible"}`}
-              />
-              <div className="min-w-0 flex-1">
-                <div className={`text-sm ${isActive ? "font-medium" : ""}`}>
-                  {model.displayName}
-                  {/* Only in the menu, not on the trigger: the footer button
-                      should read "Sonnet", not repeat the recommendation on
-                      every screen. */}
-                  {model.recommended ? (
-                    <span className="ml-1 font-normal text-muted-foreground">
-                      (recommended)
-                    </span>
-                  ) : null}
-                </div>
-                <div className="text-muted-foreground text-xs">
-                  {model.description}
-                </div>
-              </div>
-            </DropdownMenuItem>
+            <div key={provider}>
+              {groupIndex > 0 ? <DropdownMenuSeparator /> : null}
+              <DropdownMenuLabel className="flex items-center gap-1.5 text-muted-foreground text-xs">
+                <ProviderIcon provider={provider} />
+                {label}
+              </DropdownMenuLabel>
+              {rows.map((model) => renderRow(model))}
+            </div>
           );
         })}
       </DropdownMenuContent>
     </DropdownMenu>
   );
+
+  function renderRow(model: AiModelOption) {
+    const isActive = model.value === active?.value;
+    return (
+      <DropdownMenuItem
+        key={model.value}
+        className="flex items-start gap-2"
+        onSelect={() => selectModel(model.value)}
+      >
+        <CheckIcon
+          className={`mt-0.5 size-3.5 shrink-0 ${isActive ? "" : "invisible"}`}
+        />
+        <div className="min-w-0 flex-1">
+          <div className={`text-sm ${isActive ? "font-medium" : ""}`}>
+            {model.displayName}
+            {/* Only in the menu, not on the trigger: the footer button
+                      should read "Sonnet", not repeat the recommendation on
+                      every screen. */}
+            {model.recommended ? (
+              <span className="ml-1 font-normal text-muted-foreground">
+                (recommended)
+              </span>
+            ) : null}
+          </div>
+          <div className="text-muted-foreground text-xs">
+            {model.description}
+          </div>
+        </div>
+      </DropdownMenuItem>
+    );
+  }
 }
 
 /**
@@ -360,10 +409,9 @@ function Composer({
       />
       <div className="flex items-center justify-between px-3 pb-2.5">
         <div className="flex min-w-0 items-center gap-1.5 text-muted-foreground text-xs">
-          {/* Claude's own brand color — the surrounding text stays muted,
-              but the logo itself shouldn't inherit that and go monochrome. */}
-          <SiClaude className="size-3.5 shrink-0" color="#D97757" />
-          {/* Disabled mid-turn: the running turn is already committed to a
+          {/* The provider mark lives inside the picker now: a fixed Claude
+              logo here sat next to "gemma-4-31B-it" and claimed the wrong
+              answerer. Disabled mid-turn: the running turn is already committed to a
               model, so offering the switch there would be a lie. */}
           <ModelPicker disabled={sending} />
         </div>

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { interruptLiveSession } from "@/lib/ai/agent";
 import { interruptInstituteTurn } from "@/lib/ai/institute-agent";
 import { getProjectDir, NoProjectSelectedError } from "@/lib/fs/project-dir";
 import { MAIN_CONVERSATION_ID } from "@/lib/ai/types";
@@ -17,10 +18,12 @@ export async function POST(req: Request) {
     const body = (await req.json().catch(() => ({}))) as {
       conversationId?: string;
     };
-    const stopped = interruptInstituteTurn(
-      projectDir,
-      body.conversationId ?? MAIN_CONVERSATION_ID,
-    );
+    const conversationId = body.conversationId ?? MAIN_CONVERSATION_ID;
+    // Whichever backend is running this conversation's turn — the other
+    // simply has nothing to stop.
+    const stopped =
+      interruptInstituteTurn(projectDir, conversationId) ||
+      (await interruptLiveSession(projectDir, conversationId));
     return NextResponse.json({ stopped });
   } catch (error) {
     if (error instanceof NoProjectSelectedError) {

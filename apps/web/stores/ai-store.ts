@@ -19,7 +19,6 @@ import {
   FALLBACK_MODEL_OPTIONS,
   findModelOption,
   MAIN_CONVERSATION_ID,
-  toPickerOptions,
 } from "@/lib/ai/types";
 import {
   createConversation,
@@ -214,7 +213,7 @@ export const useAiStore = create<AiState>((set, get) => ({
   planUsage: null,
   // Same shape the route serves, so the picker doesn't reshuffle its rows
   // the moment the live list arrives.
-  models: toPickerOptions(FALLBACK_MODEL_OPTIONS),
+  models: FALLBACK_MODEL_OPTIONS,
   selectedModel: readPreferredModel(),
 
   // Best-effort, like loadPlanUsage: the route already falls back to a

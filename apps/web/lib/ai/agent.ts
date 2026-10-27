@@ -14,9 +14,10 @@ import { listAiSources } from "@/lib/ai/knowledge-base";
 import type {
   AiChatRequest,
   AiConversation,
+  AiMessage,
   AiModelOption,
 } from "@/lib/ai/types";
-import { DEFAULT_MODEL } from "@/lib/ai/types";
+import { DEFAULT_MODEL, modelProvider } from "@/lib/ai/types";
 import { createMyWikiTools } from "@/lib/ai/tools";
 
 /**
@@ -41,10 +42,65 @@ export function findStaleCitedSourceIds(
   return [...citedSourceIds].filter((id) => !currentSourceIds.has(id));
 }
 
+/**
+ * What a Claude turn needs to know about the conversation beyond its own
+ * session memory, and whether that session can be resumed at all.
+ *
+ * A conversation can move between the institute LLM and Claude. Claude's
+ * SDK session only remembers the turns Claude answered itself, so turns
+ * answered on the institute server in between would otherwise be invisible
+ * to it — a follow-up question would land without its context.
+ */
+export function claudeCatchUp(conversation: AiConversation): {
+  /** Earlier messages Claude's session hasn't seen, oldest first. */
+  missed: AiMessage[];
+  /** Start a new SDK session instead of resuming sdkSessionId. */
+  fresh: boolean;
+} {
+  // The last message is the question being asked right now.
+  const earlier = conversation.messages.slice(0, -1);
+  if (!conversation.sdkSessionId) return { missed: earlier, fresh: true };
+  if (conversation.claudeSeenCount === undefined) {
+    // From before the count existed. A conversation that last ran on Claude
+    // never left it: its session has everything. One that last ran on the
+    // institute LLM has an unknown number of turns Claude never saw — a
+    // clean new session with the full history beats guessing the boundary.
+    return modelProvider(conversation.model) === "claude"
+      ? { missed: [], fresh: false }
+      : { missed: earlier, fresh: true };
+  }
+  return { missed: earlier.slice(conversation.claudeSeenCount), fresh: false };
+}
+
+// Plenty for a long research thread; a cap so a conversation of hundreds of
+// turns can't push the actual question out of view.
+const MAX_MISSED_CHARS = 200_000;
+
+function missedHistoryBlock(missed: AiMessage[]): string[] {
+  const parts: string[] = [];
+  let used = 0;
+  // Newest first when cutting: the turns right before this question matter most.
+  for (const message of [...missed].reverse()) {
+    if (!message.content.trim()) continue;
+    const entry = `${message.role === "user" ? "User" : "Assistant (institute model)"}:\n${message.content}`;
+    if (used + entry.length > MAX_MISSED_CHARS) break;
+    used += entry.length;
+    parts.unshift(entry);
+  }
+  if (parts.length === 0) return [];
+  return [
+    "## Earlier in this conversation",
+    "These turns happened while the conversation ran on the institute's own LLM, so they are not in your memory of it. Treat them as the conversation so far: the user may refer to them. Their source links point to the same library; a claim you rely on still deserves your own check.",
+    "",
+    ...parts.flatMap((part) => [part, ""]),
+  ];
+}
+
 async function serializePrompt(
   projectDir: string,
   conversation: AiConversation,
   request: AiChatRequest,
+  missed: AiMessage[] = [],
 ): Promise<string> {
   const manifest = await listAiSources(projectDir);
   const currentSourceIds = new Set(manifest.sources.map((source) => source.id));
@@ -96,6 +152,7 @@ async function serializePrompt(
       ? `Selected sources: ${request.sourceIds.join(", ")}`
       : "Selected sources: all available sources",
     "",
+    ...missedHistoryBlock(missed),
     "User request:",
     request.message,
   ].filter((line): line is string => line !== null);
@@ -553,8 +610,15 @@ export async function* runMyWikiChatTurn(
   conversation: AiConversation,
   request: AiChatRequest,
   isNewSession: boolean,
+  /** Turns this session never saw (see claudeCatchUp). */
+  missed: AiMessage[] = [],
 ) {
-  const prompt = await serializePrompt(projectDir, conversation, request);
+  const prompt = await serializePrompt(
+    projectDir,
+    conversation,
+    request,
+    missed,
+  );
   const sdkSessionId = conversation.sdkSessionId ?? conversation.id;
   const model = request.model ?? conversation.model ?? DEFAULT_MODEL;
 

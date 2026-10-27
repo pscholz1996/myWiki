@@ -7,6 +7,8 @@ import {
   readAiConversation,
   updateAiConversation,
 } from "@/lib/ai/conversations";
+import { consumeUserInterrupt } from "@/lib/ai/agent";
+import { type ChatTurnEvent, runClaudeChatTurn } from "@/lib/ai/claude-turn";
 import {
   consumeInstituteInterrupt,
   runInstituteChatTurn,
@@ -18,7 +20,11 @@ import type {
   AiMessage,
   AiUsage,
 } from "@/lib/ai/types";
-import { MAIN_CONVERSATION_ID } from "@/lib/ai/types";
+import {
+  DEFAULT_MODEL,
+  MAIN_CONVERSATION_ID,
+  modelProvider,
+} from "@/lib/ai/types";
 import { getProjectDir, NoProjectSelectedError } from "@/lib/fs/project-dir";
 
 export const dynamic = "force-dynamic";
@@ -83,10 +89,27 @@ export async function POST(req: Request) {
         let contextTokens: number | undefined;
         const citations: AiCitation[] = [];
 
-        // Read once: looking at the stop flag consumes it.
+        // The conversation's own model wins over nothing being sent, as it
+        // always did; a new conversation without one starts in-house.
+        const provider = modelProvider(
+          body.model ?? conversation.model ?? DEFAULT_MODEL,
+        );
+        // A non-fatal failure the turn reported (rate limit, auth, …):
+        // stored on the answer and shown once the turn is over.
+        let turnErrorMessage: string | undefined;
+
+        // Read once: looking at a stop flag consumes it. Both are read so
+        // neither can linger into the next turn.
         let stopped: boolean | null = null;
         const wasStopped = () => {
-          stopped ??= consumeInstituteInterrupt(projectDir, conversation.id);
+          if (stopped === null) {
+            const institute = consumeInstituteInterrupt(
+              projectDir,
+              conversation.id,
+            );
+            const claude = consumeUserInterrupt(projectDir, conversation.id);
+            stopped = institute || claude;
+          }
           return stopped;
         };
 
@@ -96,14 +119,15 @@ export async function POST(req: Request) {
         // conversation is forever (seen live: an answer left blank with no
         // clue why).
         const persistAssistantReply = async (
-          turnErrorMessage?: string,
+          errorMessage: string | undefined,
+          completed: boolean,
         ): Promise<AiConversation> => {
           const failureNote = wasStopped()
             ? "You stopped this answer."
             : assistantText.trim().length === 0
-              ? (turnErrorMessage ??
+              ? (errorMessage ??
                 "The assistant turn ended without producing an answer — likely a transient error. Please ask again.")
-              : turnErrorMessage;
+              : errorMessage;
           const assistantMessage: AiMessage = {
             id: randomUUID(),
             role: "assistant",
@@ -120,6 +144,12 @@ export async function POST(req: Request) {
           nextConversation.usage = cumulativeUsage;
           nextConversation.contextTokens =
             contextTokens ?? conversation.contextTokens;
+          // Claude's session now holds everything up to its own answer;
+          // whatever the institute LLM answers next is handed over later
+          // (see claudeCatchUp). Only a turn that ran to its end counts.
+          if (provider === "claude" && completed) {
+            nextConversation.claudeSeenCount = nextConversation.messages.length;
+          }
           await updateAiConversation(
             projectDir,
             nextConversation.id,
@@ -130,15 +160,28 @@ export async function POST(req: Request) {
 
         try {
           try {
-            for await (const event of runInstituteChatTurn(
-              projectDir,
-              conversation,
-              body,
-            )) {
+            const turn: AsyncGenerator<ChatTurnEvent> =
+              provider === "claude"
+                ? runClaudeChatTurn(projectDir, conversation, body)
+                : runInstituteChatTurn(projectDir, conversation, body);
+            for await (const event of turn) {
               if (event.type === "model") {
-                // Which model actually answered. The server decides it, so
-                // the client's request can't be the record.
+                // Which model actually answered: the institute server picks
+                // its own, so the client's request can't be the record.
                 conversation = { ...conversation, model: event.model };
+              } else if (event.type === "session") {
+                conversation = {
+                  ...conversation,
+                  sdkSessionId: event.sdkSessionId,
+                };
+              } else if (event.type === "compacted") {
+                push("compacted", {
+                  trigger: event.trigger,
+                  preTokens: event.preTokens,
+                  postTokens: event.postTokens,
+                });
+              } else if (event.type === "notice") {
+                turnErrorMessage = event.message;
               } else if (event.type === "text") {
                 assistantText += event.text;
                 push("assistant_chunk", { text: event.text });
@@ -163,7 +206,10 @@ export async function POST(req: Request) {
             if (!wasStopped()) throw error;
           }
 
-          const nextConversation = await persistAssistantReply();
+          const nextConversation = await persistAssistantReply(
+            wasStopped() ? undefined : turnErrorMessage,
+            true,
+          );
           push("assistant_done", {
             conversationId: nextConversation.id,
             usage: cumulativeUsage,
@@ -172,16 +218,23 @@ export async function POST(req: Request) {
               nextConversation.messages.at(-1)?.content ?? assistantText.trim(),
             citations: citations.length > 0 ? citations : undefined,
           });
+          if (turnErrorMessage && !wasStopped()) {
+            push("error", {
+              conversationId: nextConversation.id,
+              message: turnErrorMessage,
+            });
+          }
           controller.close();
         } catch (error) {
           // Never log-and-forget: a turn that dies mid-stream is otherwise
           // invisible on the server side.
           console.error("[ai/chat] Turn failed:", error);
           const errorMessage =
-            error instanceof Error ? error.message : "Chat failed";
+            turnErrorMessage ??
+            (error instanceof Error ? error.message : "Chat failed");
 
           try {
-            await persistAssistantReply(errorMessage);
+            await persistAssistantReply(errorMessage, false);
           } catch (persistError) {
             console.error(
               "[ai/chat] Failed to persist the assistant reply:",
