@@ -17,6 +17,7 @@ import type {
 import {
   DEFAULT_MODEL,
   FALLBACK_MODEL_OPTIONS,
+  findModelOption,
   MAIN_CONVERSATION_ID,
   toPickerOptions,
 } from "@/lib/ai/types";
@@ -65,6 +66,20 @@ function readPreferredModel(): string {
 function persistPreferredModel(model: string): void {
   if (typeof window === "undefined") return;
   localStorage.setItem(PREFERRED_MODEL_KEY, model);
+}
+
+/**
+ * The model the picker should show for a stored choice. Conversations and
+ * the remembered preference can hold ids from before the chat moved to the
+ * institute server ("claude-opus-5-5", "sonnet"); showing one of those would
+ * claim a model that no longer answers. Unknown ids fall back to the
+ * default row.
+ */
+function pickerModel(
+  models: AiModelOption[],
+  model: string | undefined,
+): string {
+  return model && findModelOption(models, model) ? model : DEFAULT_MODEL;
 }
 
 interface AiState {
@@ -207,7 +222,12 @@ export const useAiStore = create<AiState>((set, get) => ({
   async loadModels() {
     try {
       const { models } = await fetchAiModels();
-      if (models.length > 0) set({ models });
+      if (models.length > 0) {
+        set({
+          models,
+          selectedModel: pickerModel(models, get().selectedModel),
+        });
+      }
     } catch {
       // Keep whatever list is already in place.
     }
@@ -266,7 +286,10 @@ export const useAiStore = create<AiState>((set, get) => ({
         // The conversation's own model wins over the remembered preference:
         // reopening a chat that ran on Opus must not silently continue it
         // on something else.
-        selectedModel: conversation?.model ?? readPreferredModel(),
+        selectedModel: pickerModel(
+          get().models,
+          conversation?.model ?? readPreferredModel(),
+        ),
       });
     } catch (error) {
       set({
@@ -418,7 +441,7 @@ export const useAiStore = create<AiState>((set, get) => ({
       set({
         activeConversation: conversation,
         currentSourceIds: conversation.sourceIds,
-        selectedModel: conversation.model,
+        selectedModel: pickerModel(get().models, conversation.model),
         planUsage: null,
       });
       await get().loadConversations();
@@ -444,7 +467,7 @@ export const useAiStore = create<AiState>((set, get) => ({
       set({
         activeConversation: conversation,
         currentSourceIds: conversation.sourceIds,
-        selectedModel: conversation.model,
+        selectedModel: pickerModel(get().models, conversation.model),
         planUsage: null,
       });
     } catch (error) {

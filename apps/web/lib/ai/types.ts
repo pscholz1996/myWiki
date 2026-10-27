@@ -100,35 +100,23 @@ export interface AiModelOption {
  */
 export const DEFAULT_MODEL_ALIAS = "default";
 
-// What the app requests when nothing else is chosen. Deliberately a wire id
-// rather than the "opus" alias: this string is persisted with a conversation,
-// and an alias would silently repoint an old conversation at a different
-// model the day Anthropic moves it. Pinning the id means a conversation keeps
-// answering with the model it was started on.
-export const DEFAULT_MODEL = "claude-opus-5-5";
+// What a conversation asks for when nothing else is chosen: whatever model
+// the institute server currently serves. An alias rather than a model id,
+// because pinning is not on offer there — the server loads one model at a
+// time and swaps it on its own schedule. What a conversation records is the
+// id that actually answered (the chat route writes it after each turn).
+export const DEFAULT_MODEL = "institute";
 
 /**
- * Shown when the SDK's own model list can't be reached (not logged in yet,
- * CLI missing, offline). Enough to keep the picker usable rather than
- * empty; the live list replaces it as soon as it arrives.
+ * Shown before the live list arrives and whenever the institute server
+ * can't be reached (no VPN). One row, because there is one server and it
+ * serves one model at a time.
  */
 export const FALLBACK_MODEL_OPTIONS: AiModelOption[] = [
   {
-    value: "opus",
-    resolvedModel: DEFAULT_MODEL,
-    displayName: "Opus",
-    description: "Best for complex, multi-step research",
-  },
-  {
-    value: "sonnet",
-    resolvedModel: "claude-sonnet-5",
-    displayName: "Sonnet",
-    description: "Efficient for routine questions",
-  },
-  {
-    value: "haiku",
-    displayName: "Haiku",
-    description: "Fastest for quick answers",
+    value: DEFAULT_MODEL,
+    displayName: "Institute LLM",
+    description: "IEM server · answers stay in-house",
   },
 ];
 

@@ -20,10 +20,15 @@ import type { AiSourceRecord } from "@/lib/ai/types";
 
 export interface AiImageRecord {
   id: string;
-  sourceId: string;
+  /**
+   * The source the pixels come from. Null only for "visual": a graphic
+   * Claude drew from knowledge gathered across sources, which is nobody's
+   * excerpt and must not pass for one.
+   */
+  sourceId: string | null;
   /** PDF page or PPTX slide number the image ultimately comes from. */
   page: number | null;
-  kind: "page-render" | "slide-media" | "crop" | "annotated";
+  kind: "page-render" | "slide-media" | "crop" | "annotated" | "visual";
   /** Image id this one was derived from (crop/annotated only). */
   parentId?: string;
   width: number;
@@ -118,6 +123,69 @@ export async function readImagePng(
 
 export function imageUrl(record: AiImageRecord): string {
   return `/api/ai/images/${record.id}`;
+}
+
+/** Longest edge of a rasterized visual — sharp on a HiDPI screen, still small. */
+const MAX_VISUAL_DIMENSION = 2400;
+
+/**
+ * Rasterizes an SVG to PNG at roughly 2x its declared size.
+ *
+ * Rasterized rather than served as SVG on purpose. An SVG opened directly
+ * (the figure frame links to its full-size version) is a document on this
+ * app's origin and runs any script inside it; a PNG can't. It also keeps
+ * one image pipeline — url, attribution, external figure API — for every
+ * picture myWiki shows.
+ *
+ * The renderer is skia's, which ignores <style> blocks and <marker>
+ * elements. The visual specialist previews through this exact function, so
+ * it sees those limits and draws around them instead of the user finding
+ * out.
+ */
+export async function rasterizeSvg(
+  svg: string,
+): Promise<{ png: Buffer; width: number; height: number }> {
+  const img = await loadImage(Buffer.from(svg, "utf8"));
+  if (!img.width || !img.height) {
+    throw new Error(
+      "SVG has no intrinsic size — give the root <svg> width and height (or a viewBox).",
+    );
+  }
+  const scale = Math.min(
+    2,
+    MAX_VISUAL_DIMENSION / Math.max(img.width, img.height),
+  );
+  const width = Math.round(img.width * scale);
+  const height = Math.round(img.height * scale);
+  const canvas = createCanvas(width, height);
+  const ctx = canvas.getContext("2d");
+  // Opaque white: a transparent graphic would sit on the dark-mode
+  // background with its dark strokes, and the figure frame is white anyway.
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, width, height);
+  ctx.drawImage(img, 0, 0, width, height);
+  return { png: canvas.toBuffer("image/png"), width, height };
+}
+
+/**
+ * Registers a graphic Claude drew itself to explain something. Not an
+ * excerpt of a source — hence no sourceId — and its attribution says whose
+ * rendering it is and what it rests on, so it is never mistaken for an
+ * original figure.
+ */
+export async function registerVisualImage(
+  projectDir: string,
+  png: Buffer,
+  info: { width: number; height: number; attribution: string },
+): Promise<AiImageRecord> {
+  return registerImage(projectDir, png, {
+    sourceId: null,
+    page: null,
+    kind: "visual",
+    width: info.width,
+    height: info.height,
+    attribution: info.attribution,
+  });
 }
 
 /**
@@ -331,7 +399,9 @@ export async function cropRegisteredImage(
   const ctx = canvas.getContext("2d");
   ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
 
-  const source = await getAiSourceRecord(projectDir, parent.sourceId);
+  const source = parent.sourceId
+    ? await getAiSourceRecord(projectDir, parent.sourceId)
+    : null;
   return registerImage(projectDir, canvas.toBuffer("image/png"), {
     sourceId: parent.sourceId,
     page: parent.page,
@@ -495,7 +565,9 @@ export async function annotateRegisteredImage(
     }
   }
 
-  const source = await getAiSourceRecord(projectDir, parent.sourceId);
+  const source = parent.sourceId
+    ? await getAiSourceRecord(projectDir, parent.sourceId)
+    : null;
   return registerImage(projectDir, canvas.toBuffer("image/png"), {
     sourceId: parent.sourceId,
     page: parent.page,

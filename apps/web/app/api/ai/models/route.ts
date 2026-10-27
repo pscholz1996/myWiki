@@ -1,49 +1,46 @@
 import { NextResponse } from "next/server";
-import { listSupportedModels } from "@/lib/ai/agent";
-import { getProjectDir, NoProjectSelectedError } from "@/lib/fs/project-dir";
+import { resolveInstituteModel } from "@/lib/ai/institute-llm";
 import {
+  type AiModelOption,
   DEFAULT_MODEL,
   FALLBACK_MODEL_OPTIONS,
-  toPickerOptions,
 } from "@/lib/ai/types";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 /**
- * Rows for the composer's model picker. The list comes from the Claude CLI
- * itself, so it reflects what this account's plan actually allows rather
- * than a catalog baked into the app.
+ * The composer's model row. The chat runs on the institute server, which
+ * serves one model at a time, so this is one row naming whichever model is
+ * loaded right now — asked from the server, never assumed.
  *
- * A failure here is never fatal: not being signed in yet is the normal
- * first-run state, and an empty picker would be a worse answer than a
- * generic one. `stale: true` tells the client the list is the fallback.
- *
- * Both branches go through toPickerOptions, so the client never has to know
- * that the SDK reports a redundant "default" row.
+ * A failure is never fatal: no VPN is a normal state, and the chat itself
+ * explains it when a message is sent. `stale: true` tells the client the
+ * row is the fallback.
  */
 export async function GET() {
   try {
-    const projectDir = getProjectDir();
-    const models = toPickerOptions(await listSupportedModels(projectDir));
+    const model = await resolveInstituteModel();
+    const row: AiModelOption = {
+      value: DEFAULT_MODEL,
+      resolvedModel: model.id,
+      // "google/gemma-4-31B-it" → "gemma-4-31B-it": the org prefix is noise
+      // in a footer, the rest is the model's own name.
+      displayName: model.id.split("/").pop() ?? model.id,
+      description: "IEM server · answers stay in-house · visuals by Claude",
+    };
     return NextResponse.json({
-      models,
+      models: [row],
       defaultModel: DEFAULT_MODEL,
       stale: false,
     });
   } catch (error) {
-    if (error instanceof NoProjectSelectedError) {
-      return NextResponse.json(
-        { error: "no-project-selected" },
-        { status: 409 },
-      );
-    }
     console.warn(
-      "[ai/models] Falling back to the built-in model list:",
+      "[ai/models] Institute LLM not reachable:",
       error instanceof Error ? error.message : error,
     );
     return NextResponse.json({
-      models: toPickerOptions(FALLBACK_MODEL_OPTIONS),
+      models: FALLBACK_MODEL_OPTIONS,
       defaultModel: DEFAULT_MODEL,
       stale: true,
     });

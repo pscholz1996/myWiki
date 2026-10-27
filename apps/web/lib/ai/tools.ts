@@ -1,5 +1,6 @@
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
+import type { AiSourceRecord } from "@/lib/ai/types";
 import {
   getAiSourceRecord,
   listAiSources,
@@ -28,11 +29,13 @@ import {
  * The knowledge-base tools, defined once and independent of which model
  * calls them.
  *
- * They used to live inline in the Claude Agent SDK's MCP server, where the
- * handlers could only be reached through the SDK's tool() wrapper. Pulled
- * out here, a caller wraps them in whatever envelope it needs — agent.ts as
- * SDK tools — and no second agent ever needs its own copy of, say, the
- * citation verifier, the one place where drift is least acceptable.
+ * They used to live inline in the Claude Agent SDK's MCP server. Since the
+ * chat moved to the institute LLM (an OpenAI-compatible endpoint) while
+ * Claude kept the visual work, two very different callers need the same
+ * handlers — and two copies of a citation verifier would drift apart in
+ * exactly the place where drift is least acceptable. Each caller wraps
+ * these in its own envelope: agent.ts as SDK tools, institute-agent.ts as
+ * OpenAI function specs.
  */
 export interface MyWikiTool {
   name: string;
@@ -54,6 +57,96 @@ function defineTool<S extends z.ZodRawShape>(
     shape,
     run: run as MyWikiTool["run"],
   };
+}
+
+/** Research tools: retrieval, reading, verification, notes. Text in, text out. */
+export const TEXT_TOOL_NAMES = [
+  "search_knowledge_base",
+  "browse_knowledge_base",
+  "read_source_page",
+  "read_source_full",
+  "cite",
+  "update_source_metadata",
+  "save_research_note",
+] as const;
+
+/**
+ * Tools that need the model to look at an image and answer with precise
+ * coordinates. Kept with Claude: measured against Claude's own crops on
+ * real pages, the institute model found the right figure (IoU 0.85-0.90)
+ * but cropped systematically too tight — column headers, banners and the
+ * outer edge of a figure were cut off in every case tested.
+ */
+export const IMAGE_TOOL_NAMES = [
+  "view_page_image",
+  "list_slide_images",
+  "view_image",
+  "crop_image",
+  "annotate_image",
+] as const;
+
+/**
+ * Short human label for a source: "Poulsen 2025, S. 5" when author and year
+ * are known, else a shortened title.
+ */
+export function sourceLabel(
+  source: AiSourceRecord,
+  page: number | null,
+  /** Label text for several pages ("13, 14"); defaults to `page`. */
+  pages?: string,
+): string {
+  const metadata = source.metadata;
+  // Guessed authors make bad labels: a proposal annex had "Part A" as its
+  // author, which turned every reference into "A 2026".
+  const author = metadata?.authorsAreHeuristic
+    ? undefined
+    : metadata?.authors?.[0]?.trim();
+  // "Poulsen, J." and "J. Poulsen" both reduce to the surname.
+  const surname = author
+    ? author.includes(",")
+      ? author.split(",")[0].trim()
+      : author.split(/\s+/).at(-1)
+    : undefined;
+  const year = metadata?.year?.trim();
+  let name: string;
+  if (surname && surname.length > 1 && year) {
+    name = `${surname} ${year}`;
+  } else {
+    // A guessed title is often generic ("Description of the action") and
+    // the same for sibling documents; the file name tells them apart.
+    const fileName = source.originalName
+      .replace(/\.[a-z0-9]+$/i, "")
+      .replace(/_+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    const title = (
+      metadata?.title && !metadata.titleIsHeuristic ? metadata.title : fileName
+    ).trim();
+    name =
+      title.length <= 48
+        ? title
+        : `${title.slice(0, 48).replace(/\s+\S*$/, "")} …`;
+  }
+  return page == null ? name : `${name}, S. ${pages ?? page}`;
+}
+
+/**
+ * The inline source link exactly as an answer should contain it — the UI
+ * turns /api/ai/sources/<id>/file#page=N links into clickable source chips.
+ * Several pages link to the first and name them all in the label.
+ *
+ * Built in code, never by a model: asked to assemble it, the institute
+ * model wrote "[<uuid>, S. 30]"; handed it ready-made, it abbreviated it.
+ * It now writes a short "[Q1, S. 30]" that source-ref-expander.ts resolves
+ * to this.
+ */
+export function citeAs(
+  source: AiSourceRecord,
+  page: number | null,
+  pages?: string,
+): string {
+  const target = `/api/ai/sources/${source.id}/file${page == null ? "" : `#page=${page}`}`;
+  return `[${sourceLabel(source, page, pages)}](${target})`;
 }
 
 export function callResult(text: unknown, isError = false): CallToolResult {
@@ -97,7 +190,22 @@ export function createMyWikiTools(
           args.topK ?? 5,
           scopedSourceIds,
         );
-        return normalizeToolResult({ hits });
+        const { sources } = await listAiSources(projectDir);
+        const byId = new Map(sources.map((source) => [source.id, source]));
+        return normalizeToolResult({
+          hits: hits.map((hit) => {
+            const source = byId.get(hit.chunk.sourceId);
+            return {
+              ...hit,
+              source: source
+                ? (source.metadata?.title ?? source.originalName)
+                : undefined,
+              cite_as: source
+                ? citeAs(source, hit.chunk.page ?? null)
+                : undefined,
+            };
+          }),
+        });
       },
     ),
     defineTool(
@@ -165,7 +273,11 @@ export function createMyWikiTools(
             args.sourceId,
             args.page,
           );
-          return normalizeToolResult(result);
+          const source = await getAiSourceRecord(projectDir, args.sourceId);
+          return normalizeToolResult({
+            ...result,
+            cite_as: source ? citeAs(source, args.page) : undefined,
+          });
         } catch (error) {
           return callResult(
             error instanceof Error

@@ -1,13 +1,10 @@
-import { query } from "@anthropic-ai/claude-agent-sdk";
+import {
+  completeInstituteChat,
+  resolveInstituteModel,
+} from "@/lib/ai/institute-llm";
 import { listAiSources } from "@/lib/ai/knowledge-base";
 import type { AiSourceRecord } from "@/lib/ai/types";
 import { sanitizeTaglineTail } from "@/lib/ai/types";
-
-/**
- * Cheapest model on the list. This is a one-line cosmetic string; spending a
- * Sonnet turn on it every time the library changes would be absurd.
- */
-const TAGLINE_MODEL = "haiku";
 
 /** Enough titles to see what a library is about without paying for the tail. */
 const MAX_TITLES = 24;
@@ -63,36 +60,21 @@ function buildPrompt(labels: string[]): string {
   ].join("\n");
 }
 
-async function generate(
-  projectDir: string,
-  labels: string[],
-): Promise<string | null> {
-  // `persistSession: false` keeps this throwaway turn out of the user's
-  // ~/.claude history, and `tools: []` denies it the knowledge base: it gets
-  // the titles in the prompt and nothing else, so it can't wander into
-  // reading sources and turn a subtitle into a billed research session.
-  const probe = query({
-    prompt: buildPrompt(labels),
-    options: {
-      cwd: projectDir,
-      model: TAGLINE_MODEL,
-      persistSession: false,
-      permissionMode: "bypassPermissions",
-      allowDangerouslySkipPermissions: true,
-      maxTurns: 1,
-      tools: [],
-    },
-  });
-
+async function generate(labels: string[]): Promise<string | null> {
+  // On the institute LLM like the chat: the source titles stay in-house.
+  // No tools — it gets the titles in the prompt and nothing else.
   try {
-    for await (const message of probe) {
-      if (message.type !== "result") continue;
-      if (message.subtype !== "success") return null;
-      return sanitizeTaglineTail(message.result);
-    }
+    const model = await resolveInstituteModel();
+    const reply = await completeInstituteChat({
+      model: model.id,
+      messages: [{ role: "user", content: buildPrompt(labels) }],
+      maxTokens: 60,
+      temperature: 0.4,
+    });
+    return sanitizeTaglineTail(reply);
+  } catch {
+    // No VPN, server down: the default subtitle is a fine answer.
     return null;
-  } finally {
-    probe.close();
   }
 }
 
@@ -116,7 +98,7 @@ export async function getProjectTagline(
   if (cached) return cached;
 
   const labels = sources.slice(0, MAX_TITLES).map(sourceLabel);
-  const pending = generate(projectDir, labels);
+  const pending = generate(labels);
   cache.set(key, pending);
   // Only a usable clause is worth keeping. A failure here is usually "not
   // logged in yet" or a hiccup, which the next visit may well not have.

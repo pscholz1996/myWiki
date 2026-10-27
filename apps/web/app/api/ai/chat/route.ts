@@ -8,11 +8,9 @@ import {
   updateAiConversation,
 } from "@/lib/ai/conversations";
 import {
-  closeLiveSession,
-  consumeUserInterrupt,
-  runMyWikiChatTurn,
-} from "@/lib/ai/agent";
-import { joinAssistantPart } from "@/lib/ai/stream-text";
+  consumeInstituteInterrupt,
+  runInstituteChatTurn,
+} from "@/lib/ai/institute-agent";
 import type {
   AiChatRequest,
   AiCitation,
@@ -35,131 +33,6 @@ function sse(type: string, data: unknown): Uint8Array {
   return encoder.encode(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`);
 }
 
-function extractUsage(message: any): AiUsage | undefined {
-  const usage = message?.usage ?? message?.result?.usage;
-  if (usage && typeof usage === "object") {
-    return {
-      inputTokens: usage.input_tokens ?? usage.inputTokens ?? 0,
-      outputTokens: usage.output_tokens ?? usage.outputTokens ?? 0,
-      cacheReadTokens:
-        usage.cache_read_input_tokens ?? usage.cacheReadTokens ?? undefined,
-      cacheWriteTokens:
-        usage.cache_creation_input_tokens ??
-        usage.cacheWriteTokens ??
-        undefined,
-    };
-  }
-
-  if (typeof message?.totalTokens === "number") {
-    return { inputTokens: 0, outputTokens: message.totalTokens };
-  }
-
-  return undefined;
-}
-
-function assistantTextFromMessage(message: any): string {
-  const blocks = message?.message?.content ?? message?.content ?? [];
-  return blocks
-    .filter((block: any) => block?.type === "text")
-    .map((block: any) => block.text)
-    .join("");
-}
-
-// SDKAssistantMessageError / SDKResultError subtypes come back as opaque
-// codes (e.g. "rate_limit", "error_max_turns") that mean nothing to a user.
-// Map the ones we can act on to plain language; unmapped codes fall through
-// to the caller's own fallback message rather than showing a raw code.
-function friendlySdkError(code: string | undefined | null): string | undefined {
-  switch (code) {
-    case "authentication_failed":
-      return "Claude authentication failed. Try signing in to Claude Code again.";
-    case "oauth_org_not_allowed":
-      return "Your Claude account isn't permitted to use this integration.";
-    case "billing_error":
-      return "There's a billing issue with your Claude account.";
-    case "rate_limit":
-      return "You've hit your Claude plan's rate limit. Wait a bit and try again.";
-    case "overloaded":
-      return "Claude's servers are overloaded right now. Try again shortly.";
-    case "invalid_request":
-      return "The request to Claude was invalid.";
-    case "model_not_found":
-      return "The selected Claude model isn't available.";
-    case "server_error":
-      return "Claude hit a server error. Try again.";
-    case "max_output_tokens":
-      return "The response hit the maximum output length before finishing.";
-    case "error_max_turns":
-      return 'The assistant hit the safety cap on tool calls for a single turn and stopped. Say "continue" to let it pick up where it left off.';
-    case "error_max_budget_usd":
-      return "This turn exceeded its cost budget and was stopped.";
-    case "error_max_structured_output_retries":
-      return "The assistant couldn't produce a valid response after several attempts.";
-    case "error_during_execution":
-      return "An error occurred while the assistant was working.";
-    default:
-      return undefined;
-  }
-}
-
-/**
- * Track pending mcp__mywiki__cite tool calls by tool_use id, then
- * confirm them as citations only once their tool_result comes back
- * verified. A cite() call that fails verification (quote not found on the
- * page) must never surface to the user as a citation.
- */
-function collectCitation(
-  sdkMessage: any,
-  pending: Map<string, { sourceId: string; page: number; quote: string }>,
-  citations: AiCitation[],
-): void {
-  const kind = sdkMessage?.type;
-  const blocks = sdkMessage?.message?.content ?? [];
-
-  if (kind === "assistant") {
-    for (const block of blocks) {
-      if (
-        block?.type === "tool_use" &&
-        block.name === "mcp__mywiki__cite" &&
-        block.input &&
-        typeof block.input.sourceId === "string" &&
-        typeof block.input.page === "number" &&
-        typeof block.input.quote === "string"
-      ) {
-        pending.set(block.id, {
-          sourceId: block.input.sourceId,
-          page: block.input.page,
-          quote: block.input.quote,
-        });
-      }
-    }
-    return;
-  }
-
-  if (kind === "user") {
-    for (const block of blocks) {
-      if (block?.type !== "tool_result") continue;
-      const call = pending.get(block.tool_use_id);
-      if (!call) continue;
-      pending.delete(block.tool_use_id);
-
-      const text = Array.isArray(block.content)
-        ? block.content.find((c: any) => c?.type === "text")?.text
-        : undefined;
-      if (typeof text !== "string") continue;
-
-      try {
-        const parsed = JSON.parse(text);
-        if (parsed?.verified === true) {
-          citations.push(call);
-        }
-      } catch {
-        // Not a JSON tool result — not a verified citation.
-      }
-    }
-  }
-}
-
 export async function POST(req: Request) {
   try {
     const body = (await req.json()) as AiChatRequest;
@@ -172,31 +45,14 @@ export async function POST(req: Request) {
     const projectDir = getProjectDir();
     const conversationId = body.conversationId ?? MAIN_CONVERSATION_ID;
     const existing = await readAiConversation(projectDir, conversationId);
-    // No prior turns means no SDK session has been established yet — see
-    // the isNewSession/resume split in runMyWikiChatTurn.
-    const isNewSession = !existing || existing.messages.length === 0;
     let conversation: AiConversation =
-      existing ??
-      (await createAiConversation({
-        projectDir,
-        conversationId,
-        model: body.model,
-      }));
+      existing ?? (await createAiConversation({ projectDir, conversationId }));
 
     conversation = {
       ...conversation,
-      model: body.model ?? conversation.model,
       // History list titles come from the opening question.
       title: conversation.title ?? message.slice(0, 80),
       sourceIds: body.sourceIds ?? conversation.sourceIds,
-      // Must be a real UUID, independent of conversation.id: the Claude
-      // Agent SDK accepts any caller-chosen string for a brand-new session
-      // (sessionId, first turn only), but --resume on every turn after
-      // that requires a real UUID or session title. conversation.id is now
-      // the fixed, human-readable MAIN_CONVERSATION_ID ("main") rather than
-      // a UUID (see the single-continuing-conversation change), so it can
-      // no longer double as the SDK session id the way it used to.
-      sdkSessionId: conversation.sdkSessionId ?? randomUUID(),
     };
 
     const userMessage: AiMessage = {
@@ -224,40 +80,25 @@ export async function POST(req: Request) {
         // Cumulative across the whole conversation, not just this turn —
         // what the panel's "N in / M out" header is meant to represent.
         let cumulativeUsage: AiUsage | undefined = conversation.usage;
-        // Approximate current context-window size: cacheReadTokens +
-        // inputTokens of the latest turn is what was actually loaded for
-        // that API call (see the AiConversation.contextTokens doc comment
-        // for why this is an estimate, not the SDK's exact figure).
         let contextTokens: number | undefined;
-        // The first recognizable failure this turn hits (auth, billing,
-        // rate limit, overload, etc.) — surfaced as a friendly toast
-        // instead of leaving the user to infer it from a stalled response.
-        let turnErrorMessage: string | undefined;
-        // Verbatim SDK result errors — inspected (not shown) to recognize
-        // recoverable failures like a lost session transcript.
-        let rawResultErrors = "";
-        const pendingCitations = new Map<
-          string,
-          { sourceId: string; page: number; quote: string }
-        >();
         const citations: AiCitation[] = [];
 
-        // Shared by both the normal completion path and the error path
-        // below — a turn that dies partway through (e.g. during citation
-        // verification) should still save whatever text was actually
-        // generated, not throw it away along with the failure.
-        const persistAssistantReply = async (): Promise<AiConversation> => {
-          // A turn that produced no text must never persist as a silently
-          // blank bubble — the toast that explains it is gone after seconds,
-          // but the conversation is forever. Store the reason ON the message
-          // so the transcript itself says what happened (seen live: a plan
-          // rate limit rejecting the turn left an empty answer with no clue).
-          // A user-initiated stop reports as error_during_execution too —
-          // but it's not an error, so it gets its own calm note and no
-          // error toast.
-          const wasUserStop = consumeUserInterrupt(projectDir, conversation.id);
-          if (wasUserStop) turnErrorMessage = undefined;
-          const failureNote = wasUserStop
+        // Read once: looking at the stop flag consumes it.
+        let stopped: boolean | null = null;
+        const wasStopped = () => {
+          stopped ??= consumeInstituteInterrupt(projectDir, conversation.id);
+          return stopped;
+        };
+
+        // Shared by the normal path and the error path — a turn that dies
+        // partway through still keeps the text it produced, and a turn that
+        // produced none keeps the reason. A toast is gone in seconds; the
+        // conversation is forever (seen live: an answer left blank with no
+        // clue why).
+        const persistAssistantReply = async (
+          turnErrorMessage?: string,
+        ): Promise<AiConversation> => {
+          const failureNote = wasStopped()
             ? "You stopped this answer."
             : assistantText.trim().length === 0
               ? (turnErrorMessage ??
@@ -287,104 +128,39 @@ export async function POST(req: Request) {
           return nextConversation;
         };
 
-        // The SDK stores session transcripts per working directory, so a
-        // moved knowledge folder (or a cleaned ~/.claude) makes --resume
-        // fail with "No conversation found with session ID". That's
-        // recoverable: mint a fresh SDK session for this conversation and
-        // run the turn again — the in-app transcript is untouched; only
-        // the model's in-session memory of earlier turns is lost.
-        const isLostSession = () =>
-          rawResultErrors.includes("No conversation found with session ID");
-
-        const runTurn = async (asNewSession: boolean) => {
-          for await (const sdkMessage of runMyWikiChatTurn(
-            projectDir,
-            conversation,
-            body,
-            asNewSession,
-          )) {
-            push("sdk", sdkMessage);
-            collectCitation(sdkMessage, pendingCitations, citations);
-
-            const kind = (sdkMessage as any)?.type;
-            if (kind === "assistant") {
-              const chunk = assistantTextFromMessage(sdkMessage);
-              if (chunk) {
-                const emitted = joinAssistantPart(assistantText, chunk);
-                assistantText += emitted;
-                push("assistant_chunk", { text: emitted });
-              }
-              const assistantError = (sdkMessage as any).error;
-              if (assistantError) {
-                turnErrorMessage =
-                  friendlySdkError(assistantError) ?? turnErrorMessage;
-              }
-            }
-
-            if (kind === "result") {
-              usage = extractUsage(sdkMessage);
-              if (usage) {
+        try {
+          try {
+            for await (const event of runInstituteChatTurn(
+              projectDir,
+              conversation,
+              body,
+            )) {
+              if (event.type === "model") {
+                // Which model actually answered. The server decides it, so
+                // the client's request can't be the record.
+                conversation = { ...conversation, model: event.model };
+              } else if (event.type === "text") {
+                assistantText += event.text;
+                push("assistant_chunk", { text: event.text });
+              } else if (event.type === "citation") {
+                citations.push(event.citation);
+              } else if (event.type === "tool") {
+                console.log(
+                  `[ai/chat] ${event.name} ${event.ok ? "ok" : `FAILED: ${event.detail}`} (${event.ms} ms)`,
+                );
+                push("tool", event);
+              } else if (event.type === "usage") {
+                usage = event.usage;
                 cumulativeUsage = mergeUsage(conversation.usage, usage);
-                contextTokens =
-                  (usage.cacheReadTokens ?? 0) + usage.inputTokens;
+                contextTokens = event.contextTokens;
                 push("usage", { usage: cumulativeUsage, contextTokens });
               }
-              if ((sdkMessage as any).is_error) {
-                const resultMessage = sdkMessage as any;
-                rawResultErrors = (resultMessage.errors ?? []).join("; ");
-                turnErrorMessage =
-                  friendlySdkError(resultMessage.subtype) ??
-                  resultMessage.errors?.[0] ??
-                  turnErrorMessage ??
-                  "The assistant turn ended with an error.";
-              }
             }
-
-            // Proactive plan rate-limit status (five-hour/seven-day windows
-            // for claude.ai subscription users) — only worth surfacing once
-            // it actually blocks the request, not on every utilization tick.
-            if (kind === "rate_limit_event") {
-              const info = (sdkMessage as any).rate_limit_info;
-              if (info?.status === "rejected") {
-                const resetText = info.resetsAt
-                  ? ` Resets around ${new Date(info.resetsAt).toLocaleTimeString()}.`
-                  : "";
-                turnErrorMessage = `You've hit your Claude plan's rate limit.${resetText}`;
-              }
-            }
-
-            // The SDK compacted this conversation's history to stay within
-            // the context window (see agent.ts's autoCompactEnabled). This
-            // doesn't change anything we need to do — the SDK's own
-            // persisted session already summarized what it dropped — but
-            // the user should know it happened rather than just noticing
-            // the model "forgot" something from many turns ago.
-            if (
-              kind === "system" &&
-              (sdkMessage as any)?.subtype === "compact_boundary"
-            ) {
-              const metadata = (sdkMessage as any).compact_metadata ?? {};
-              push("compacted", {
-                trigger: metadata.trigger,
-                preTokens: metadata.pre_tokens,
-                postTokens: metadata.post_tokens,
-              });
-            }
-          }
-        };
-
-        try {
-          await runTurn(isNewSession);
-
-          if (isLostSession() && assistantText.trim().length === 0) {
-            console.warn(
-              `[ai/chat] SDK session ${conversation.sdkSessionId} not found (knowledge folder moved?) — starting a fresh session for conversation ${conversation.id}`,
-            );
-            closeLiveSession(projectDir, conversation.id);
-            conversation = { ...conversation, sdkSessionId: randomUUID() };
-            rawResultErrors = "";
-            turnErrorMessage = undefined;
-            await runTurn(true);
+          } catch (error) {
+            // The stop button aborts the request mid-stream, which lands
+            // here as an abort error. That is the user's choice, not a
+            // failure: keep what was written and end the turn normally.
+            if (!wasStopped()) throw error;
           }
 
           const nextConversation = await persistAssistantReply();
@@ -396,38 +172,21 @@ export async function POST(req: Request) {
               nextConversation.messages.at(-1)?.content ?? assistantText.trim(),
             citations: citations.length > 0 ? citations : undefined,
           });
-          if (turnErrorMessage) {
-            push("error", {
-              conversationId: nextConversation.id,
-              message: turnErrorMessage,
-            });
-          }
           controller.close();
         } catch (error) {
           // Never log-and-forget: a turn that dies mid-stream is otherwise
-          // invisible — the user's own message was already persisted before
-          // streaming started, but with nothing here, the assistant side
-          // stays silently blank forever (no saved reply, no server-side
-          // trace to diagnose from) even if real work — tokens, tool calls,
-          // partial text — already happened before the failure.
+          // invisible on the server side.
           console.error("[ai/chat] Turn failed:", error);
-
           const errorMessage =
-            turnErrorMessage ??
-            (error instanceof Error ? error.message : "Chat failed");
+            error instanceof Error ? error.message : "Chat failed";
 
-          // Persist whatever text the model produced before it failed, so a
-          // late-turn error (e.g. during citation verification) doesn't
-          // throw away real, already-generated content along with it.
-          if (assistantText.trim()) {
-            try {
-              await persistAssistantReply();
-            } catch (persistError) {
-              console.error(
-                "[ai/chat] Failed to persist partial assistant message:",
-                persistError,
-              );
-            }
+          try {
+            await persistAssistantReply(errorMessage);
+          } catch (persistError) {
+            console.error(
+              "[ai/chat] Failed to persist the assistant reply:",
+              persistError,
+            );
           }
 
           push("error", {
