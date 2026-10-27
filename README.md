@@ -44,7 +44,7 @@ with the entire LaTeX/editor/writing layer removed.
 
 ```bash
 pnpm install
-pnpm dev        # web app on http://localhost:3000
+pnpm dev        # web app on http://localhost:4310
 ```
 
 Requires Node 20+ and pnpm. Sign in with your Claude account from the header

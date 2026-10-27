@@ -14,7 +14,7 @@
 git clone https://github.com/pscholz1996/myWiki.git
 cd myWiki
 pnpm install
-pnpm dev            # web app on http://localhost:3000
+pnpm dev            # web app on http://localhost:4310
 ```
 
 On first launch the app asks you to pick a knowledge folder; the choice is

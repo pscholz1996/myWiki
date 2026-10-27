@@ -6,6 +6,6 @@ the [root README](../../README.md) for the feature overview and
 [CONTRIBUTING.md](../../CONTRIBUTING.md) for setup.
 
 ```bash
-pnpm dev    # http://localhost:3000
+pnpm dev    # http://localhost:4310
 pnpm test
 ```
