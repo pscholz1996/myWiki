@@ -9,6 +9,8 @@ import {
   listKnownKbs,
   readKbName,
   resolveKbRef,
+  resolveProjectDirForRequest,
+  UnknownKbError,
   writeKbName,
 } from "./kb-registry";
 
@@ -129,5 +131,29 @@ describe("resolveKbRef", () => {
 
   test("returns null for unknown names", () => {
     expect(resolveKbRef("nope")).toBeNull();
+  });
+});
+
+describe("resolveProjectDirForRequest", () => {
+  test("falls back to the selected project without a reference", () => {
+    expect(resolveProjectDirForRequest(undefined, () => "X")).toBe("X");
+    expect(resolveProjectDirForRequest("   ", () => "X")).toBe("X");
+  });
+
+  test("resolves a registered name without touching the fallback", () => {
+    const dir = makeKbDir("ext-kb");
+    writeKbName(dir, "Papers");
+    setCurrentProject(dir);
+    expect(
+      resolveProjectDirForRequest("papers", () => {
+        throw new Error("fallback must not run");
+      }),
+    ).toBe(dir);
+  });
+
+  test("throws UnknownKbError for a reference that matches nothing", () => {
+    expect(() => resolveProjectDirForRequest("nope", () => "X")).toThrow(
+      UnknownKbError,
+    );
   });
 });

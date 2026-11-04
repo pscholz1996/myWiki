@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { getProjectDir, NoProjectSelectedError } from "@/lib/fs/project-dir";
 import {
+  resolveProjectDirForRequest,
+  UnknownKbError,
+} from "@/lib/project/kb-registry";
+import {
   deleteAiSource,
   updateAiSourceMetadata,
 } from "@/lib/ai/knowledge-base";
@@ -9,15 +13,22 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 export async function DELETE(
-  _req: Request,
+  req: Request,
   context: { params: Promise<{ sourceId: string }> },
 ) {
   try {
     const { sourceId } = await context.params;
-    const projectDir = getProjectDir();
+    const projectRef = new URL(req.url).searchParams.get("project");
+    const projectDir = resolveProjectDirForRequest(projectRef, getProjectDir);
     const manifest = await deleteAiSource(projectDir, sourceId);
     return NextResponse.json(manifest);
   } catch (error) {
+    if (error instanceof UnknownKbError) {
+      return NextResponse.json(
+        { error: "unknown-project", project: error.ref },
+        { status: 404 },
+      );
+    }
     if (error instanceof NoProjectSelectedError) {
       return NextResponse.json(
         { error: "no-project-selected" },
@@ -33,7 +44,12 @@ export async function PATCH(
   req: Request,
   context: { params: Promise<{ sourceId: string }> },
 ) {
-  let body: { title?: unknown; authors?: unknown; year?: unknown };
+  let body: {
+    title?: unknown;
+    authors?: unknown;
+    year?: unknown;
+    project?: unknown;
+  };
   try {
     body = await req.json();
   } catch {
@@ -51,7 +67,10 @@ export async function PATCH(
 
   try {
     const { sourceId } = await context.params;
-    const projectDir = getProjectDir();
+    const projectDir = resolveProjectDirForRequest(
+      typeof body.project === "string" ? body.project : null,
+      getProjectDir,
+    );
     const source = await updateAiSourceMetadata(projectDir, sourceId, {
       title,
       authors,
@@ -59,6 +78,12 @@ export async function PATCH(
     });
     return NextResponse.json(source);
   } catch (error) {
+    if (error instanceof UnknownKbError) {
+      return NextResponse.json(
+        { error: "unknown-project", project: error.ref },
+        { status: 404 },
+      );
+    }
     if (error instanceof NoProjectSelectedError) {
       return NextResponse.json(
         { error: "no-project-selected" },

@@ -2,6 +2,10 @@ import fs from "node:fs/promises";
 import { NextResponse } from "next/server";
 import { getProjectDir, NoProjectSelectedError } from "@/lib/fs/project-dir";
 import {
+  resolveProjectDirForRequest,
+  UnknownKbError,
+} from "@/lib/project/kb-registry";
+import {
   getAiSourceFilePath,
   getAiSourceRecord,
 } from "@/lib/ai/knowledge-base";
@@ -17,12 +21,13 @@ const CONTENT_TYPES: Record<string, string> = {
 };
 
 export async function GET(
-  _req: Request,
+  req: Request,
   context: { params: Promise<{ sourceId: string }> },
 ) {
   try {
     const { sourceId } = await context.params;
-    const projectDir = getProjectDir();
+    const projectRef = new URL(req.url).searchParams.get("project");
+    const projectDir = resolveProjectDirForRequest(projectRef, getProjectDir);
     const source = await getAiSourceRecord(projectDir, sourceId);
 
     if (!source) {
@@ -39,6 +44,12 @@ export async function GET(
       },
     });
   } catch (error) {
+    if (error instanceof UnknownKbError) {
+      return NextResponse.json(
+        { error: "unknown-project", project: error.ref },
+        { status: 404 },
+      );
+    }
     if (error instanceof NoProjectSelectedError) {
       return NextResponse.json(
         { error: "no-project-selected" },

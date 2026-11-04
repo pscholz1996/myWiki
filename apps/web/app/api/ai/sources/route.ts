@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { getProjectDir, NoProjectSelectedError } from "@/lib/fs/project-dir";
 import {
+  resolveProjectDirForRequest,
+  UnknownKbError,
+} from "@/lib/project/kb-registry";
+import {
   listAiSources,
   uploadAiSources,
   type AiUploadProgressEvent,
@@ -9,12 +13,21 @@ import {
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
-    const projectDir = getProjectDir();
+    // ?project=<name|path> lets an external caller (Claude in another
+    // workspace) read a KB without changing the UI's selected project.
+    const projectRef = new URL(req.url).searchParams.get("project");
+    const projectDir = resolveProjectDirForRequest(projectRef, getProjectDir);
     const manifest = await listAiSources(projectDir);
     return NextResponse.json(manifest);
   } catch (error) {
+    if (error instanceof UnknownKbError) {
+      return NextResponse.json(
+        { error: "unknown-project", project: error.ref },
+        { status: 404 },
+      );
+    }
     if (error instanceof NoProjectSelectedError) {
       return NextResponse.json(
         { error: "no-project-selected" },
@@ -41,6 +54,8 @@ export async function POST(req: Request) {
   const files = (formData?.getAll("files") ?? []).filter(
     (item): item is File => item instanceof File,
   );
+  const projectField = formData?.get("project");
+  const projectRef = typeof projectField === "string" ? projectField : null;
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -49,7 +64,10 @@ export async function POST(req: Request) {
       };
 
       try {
-        const projectDir = getProjectDir();
+        const projectDir = resolveProjectDirForRequest(
+          projectRef,
+          getProjectDir,
+        );
 
         if (files.length === 0) {
           push("error", { error: "No files uploaded" });
@@ -69,7 +87,9 @@ export async function POST(req: Request) {
 
         push("done", { ...manifest, rejected, warnings });
       } catch (error) {
-        if (error instanceof NoProjectSelectedError) {
+        if (error instanceof UnknownKbError) {
+          push("error", { error: "unknown-project", project: error.ref });
+        } else if (error instanceof NoProjectSelectedError) {
           push("error", { error: "no-project-selected" });
         } else {
           const message =

@@ -96,6 +96,34 @@ export function listKnownKbs(): KnownKb[] {
  * name (case-insensitive) — to a project directory, without touching the
  * globally-selected project. Returns null if nothing matches.
  */
+export class UnknownKbError extends Error {
+  readonly ref: string;
+  constructor(ref: string) {
+    super(`Unknown knowledge base: ${ref}`);
+    this.name = "UnknownKbError";
+    this.ref = ref;
+  }
+}
+
+/**
+ * Project directory for a request: the referenced KB when an external
+ * caller names one (name or absolute path), else the globally-selected
+ * project. Throws UnknownKbError for a reference that matches nothing and
+ * NoProjectSelectedError (from getProjectDir) when nothing is selected.
+ * Routes use this so a session in another KB is never flipped underneath
+ * the user by a caller from outside.
+ */
+export function resolveProjectDirForRequest(
+  ref: string | null | undefined,
+  fallback: () => string,
+): string {
+  const trimmed = ref?.trim();
+  if (!trimmed) return fallback();
+  const resolved = resolveKbRef(trimmed);
+  if (!resolved) throw new UnknownKbError(trimmed);
+  return resolved;
+}
+
 export function resolveKbRef(ref: string): string | null {
   const trimmed = ref.trim();
   if (!trimmed) return null;
