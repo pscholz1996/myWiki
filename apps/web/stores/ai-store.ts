@@ -37,18 +37,51 @@ import {
   uploadAiSources,
 } from "@/lib/ai/ai-client";
 
-// Which conversation the user last had open, per browser. Falling back to
-// the legacy "main" id keeps pre-multi-conversation projects working.
+// Which conversation the user last had open, per browser and per knowledge
+// base. A conversation id only means something inside the folder it lives
+// in, so one value for all knowledge bases sent a freshly switched-to base
+// looking for another one's chat — and came up empty every time, which
+// read as the chat being lost. Falling back to the legacy "main" id keeps
+// pre-multi-conversation projects working.
 const ACTIVE_CONVERSATION_KEY = "mywiki-active-conversation";
 
-function readActiveConversationId(): string {
-  if (typeof window === "undefined") return MAIN_CONVERSATION_ID;
-  return localStorage.getItem(ACTIVE_CONVERSATION_KEY) ?? MAIN_CONVERSATION_ID;
+function activeConversationKey(projectPath: string): string {
+  return `${ACTIVE_CONVERSATION_KEY}:${projectPath}`;
 }
 
-function persistActiveConversationId(id: string): void {
+function readActiveConversationId(projectPath: string | null): string {
+  if (typeof window === "undefined" || !projectPath) {
+    return MAIN_CONVERSATION_ID;
+  }
+  return (
+    localStorage.getItem(activeConversationKey(projectPath)) ??
+    MAIN_CONVERSATION_ID
+  );
+}
+
+function persistActiveConversationId(
+  projectPath: string | null,
+  id: string,
+): void {
+  if (typeof window === "undefined" || !projectPath) return;
+  localStorage.setItem(activeConversationKey(projectPath), id);
+}
+
+/**
+ * One-time move of the old single value onto the knowledge base that is
+ * open now. It was last written in whichever base was open last, and that
+ * is the one the app reopens — so the chat the user had open survives the
+ * update instead of landing on "main". Removed afterwards, so no other
+ * knowledge base inherits it.
+ */
+function migrateLegacyActiveConversation(projectPath: string): void {
   if (typeof window === "undefined") return;
-  localStorage.setItem(ACTIVE_CONVERSATION_KEY, id);
+  const legacy = localStorage.getItem(ACTIVE_CONVERSATION_KEY);
+  if (legacy === null) return;
+  if (localStorage.getItem(activeConversationKey(projectPath)) === null) {
+    localStorage.setItem(activeConversationKey(projectPath), legacy);
+  }
+  localStorage.removeItem(ACTIVE_CONVERSATION_KEY);
 }
 
 // The model a NEW conversation starts on. Each conversation carries its own
@@ -94,6 +127,12 @@ interface AiState {
   uploadProgress: AiUploadProgressEvent | null;
   compactionNotice: AiCompactionNotice | null;
   planUsage: AiPlanUsage | null;
+  /**
+   * The knowledge base this store is bound to. Keys the remembered active
+   * chat — bound before the first load, see bindProject.
+   */
+  projectPath: string | null;
+  bindProject: (projectPath: string) => void;
   /** Rows for the composer's model picker, as the CLI reports them. */
   models: AiModelOption[];
   /** Model the next message will run on. */
@@ -202,6 +241,7 @@ export const useAiStore = create<AiState>((set, get) => ({
   manifest: null,
   sources: [],
   activeConversation: null,
+  projectPath: null,
   conversations: [],
   currentSourceIds: [],
   loading: false,
@@ -273,11 +313,17 @@ export const useAiStore = create<AiState>((set, get) => ({
     }
   },
 
+  bindProject(projectPath: string) {
+    if (get().projectPath === projectPath) return;
+    migrateLegacyActiveConversation(projectPath);
+    set({ projectPath });
+  },
+
   async loadConversation() {
     set({ loading: true, error: null });
     try {
       const conversation = await fetchAiConversation(
-        readActiveConversationId(),
+        readActiveConversationId(get().projectPath),
       );
       set({
         activeConversation: conversation,
@@ -436,7 +482,7 @@ export const useAiStore = create<AiState>((set, get) => ({
     set({ actionLoading: true, error: null });
     try {
       const conversation = await createConversation(get().selectedModel);
-      persistActiveConversationId(conversation.id);
+      persistActiveConversationId(get().projectPath, conversation.id);
       set({
         activeConversation: conversation,
         currentSourceIds: conversation.sourceIds,
@@ -462,7 +508,7 @@ export const useAiStore = create<AiState>((set, get) => ({
     try {
       const conversation = await fetchAiConversation(conversationId);
       if (!conversation) throw new Error("Conversation not found");
-      persistActiveConversationId(conversationId);
+      persistActiveConversationId(get().projectPath, conversationId);
       set({
         activeConversation: conversation,
         currentSourceIds: conversation.sourceIds,
@@ -488,7 +534,7 @@ export const useAiStore = create<AiState>((set, get) => ({
       await deleteConversation(conversationId);
       const wasActive = get().activeConversation?.id === conversationId;
       if (wasActive) {
-        persistActiveConversationId(MAIN_CONVERSATION_ID);
+        persistActiveConversationId(get().projectPath, MAIN_CONVERSATION_ID);
         set({ activeConversation: null, planUsage: null });
       }
       await get().loadConversations();
@@ -536,7 +582,7 @@ export const useAiStore = create<AiState>((set, get) => ({
     }
 
     const activeConversation: AiConversation = get().activeConversation ?? {
-      id: readActiveConversationId(),
+      id: readActiveConversationId(get().projectPath),
       model: get().selectedModel,
       // Optimistic placeholder only — never sent to the server (AiChatRequest
       // has no sdkSessionId field) and overwritten once the real conversation

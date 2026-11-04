@@ -10,12 +10,12 @@ import {
   CopyIcon,
   FolderIcon,
   FolderOpenIcon,
-  HistoryIcon,
   LibraryBigIcon,
   Loader2Icon,
   MonitorIcon,
   MoonIcon,
   MoreHorizontalIcon,
+  PanelLeftIcon,
   PencilIcon,
   ShieldCheckIcon,
   SquareIcon,
@@ -46,6 +46,7 @@ import { RenameKbDialog } from "@/components/project/rename-kb-dialog";
 import type { KnownKb } from "@/lib/project/kb-registry";
 import { useAiStore } from "@/stores/ai-store";
 import type {
+  AiConversationSummary,
   AiMessage,
   AiModelOption,
   AiPlanUsage,
@@ -353,6 +354,113 @@ function ModelPicker({ disabled }: { disabled?: boolean }) {
   }
 }
 
+const SIDEBAR_KEY = "mywiki-chats-sidebar";
+
+/**
+ * The knowledge base's chats, the way ChatGPT and Claude show theirs: a
+ * list down the left, newest first, the open one marked, a new one on top.
+ *
+ * Replaces a "History" dropdown that held the same list. The dropdown
+ * worked, but a list hidden behind a clock icon was read as there being
+ * no list at all — and switching knowledge bases then looked like the
+ * chats had gone. They never had: every chat lives inside its knowledge
+ * base's folder, and this is the base's own list.
+ */
+function ChatSidebar({
+  open,
+  conversations,
+  activeId,
+  canStartNew,
+  busy,
+  onNew,
+  onToggle,
+  onSwitch,
+  onDelete,
+}: {
+  open: boolean;
+  conversations: AiConversationSummary[];
+  activeId: string | undefined;
+  canStartNew: boolean;
+  busy: boolean;
+  onNew: () => void;
+  onToggle: () => void;
+  onSwitch: (id: string) => void;
+  onDelete: (id: string, title: string) => void;
+}) {
+  if (!open) return null;
+  return (
+    // Overlays the chat on narrow windows, sits beside it from md up — a
+    // 16rem column would leave a phone-width window no room to read.
+    <aside className="absolute inset-y-0 left-0 z-20 flex w-64 shrink-0 flex-col border-r bg-background shadow-lg md:static md:bg-muted/30 md:shadow-none">
+      <div className="flex items-center gap-1 p-2">
+        <Button
+          variant="outline"
+          size="sm"
+          className="min-w-0 flex-1 justify-start gap-2"
+          onClick={onNew}
+          disabled={!canStartNew || busy}
+        >
+          <SquarePenIcon className="size-4" />
+          New chat
+        </Button>
+        <TooltipIconButton tooltip="Hide chats" onClick={onToggle}>
+          <PanelLeftIcon className="size-4" />
+        </TooltipIconButton>
+      </div>
+      <div className="px-3 pb-1 text-muted-foreground text-xs">Chats</div>
+      <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
+        {conversations.length === 0 ? (
+          <p className="px-2 py-3 text-muted-foreground text-xs">
+            Chats appear here once you ask something.
+          </p>
+        ) : (
+          conversations.map((entry) => {
+            const title = entry.title ?? "Untitled conversation";
+            const isActive = entry.id === activeId;
+            return (
+              <div
+                key={entry.id}
+                className={`group/item flex items-start rounded-md ${
+                  isActive ? "bg-muted" : "hover:bg-muted/60"
+                }`}
+              >
+                <button
+                  type="button"
+                  className="min-w-0 flex-1 px-2 py-1.5 text-left"
+                  onClick={() => {
+                    if (!isActive) onSwitch(entry.id);
+                  }}
+                  disabled={busy}
+                >
+                  <div
+                    className={`truncate text-sm ${isActive ? "font-medium" : ""}`}
+                  >
+                    {title}
+                  </div>
+                  <div className="text-muted-foreground text-xs">
+                    {formatConversationDate(entry.updatedAt)} ·{" "}
+                    {Math.ceil(entry.messageCount / 2)} question
+                    {entry.messageCount > 2 ? "s" : ""}
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  className="mt-1.5 mr-1 rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:text-destructive focus-visible:opacity-100 group-hover/item:opacity-100"
+                  title="Delete chat"
+                  onClick={() => onDelete(entry.id, title)}
+                  disabled={busy}
+                >
+                  <Trash2Icon className="size-3.5" />
+                </button>
+              </div>
+            );
+          })
+        )}
+      </div>
+    </aside>
+  );
+}
+
 /**
  * Quiet link to the project's source, parked in the bottom-left corner.
  *
@@ -492,6 +600,28 @@ export function ChatApp({ current, currentName, recent }: ChatAppProps) {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
+  // Open by default; a closed sidebar is remembered per browser. Read in
+  // an effect, not in the initializer: the server renders it open, and a
+  // different first client render would be a hydration mismatch.
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  useEffect(() => {
+    try {
+      setSidebarOpen(localStorage.getItem(SIDEBAR_KEY) !== "closed");
+    } catch {
+      // Blocked storage: stays open, which is the default anyway.
+    }
+  }, []);
+  const toggleSidebar = () => {
+    const next = !sidebarOpen;
+    setSidebarOpen(next);
+    try {
+      localStorage.setItem(SIDEBAR_KEY, next ? "open" : "closed");
+    } catch {
+      // Not remembered, still toggled.
+    }
+  };
+
+  const bindProject = useAiStore((state) => state.bindProject);
   const sources = useAiStore((state) => state.sources);
   const activeConversation = useAiStore((state) => state.activeConversation);
   const error = useAiStore((state) => state.error);
@@ -530,6 +660,8 @@ export function ChatApp({ current, currentName, recent }: ChatAppProps) {
   const isTurnRunning = chatLoading;
 
   useEffect(() => {
+    // Before anything reads the remembered chat: its key is the knowledge base.
+    bindProject(current);
     void Promise.all([
       loadSources(),
       loadConversation(),
@@ -541,6 +673,8 @@ export function ChatApp({ current, currentName, recent }: ChatAppProps) {
       loadModels(),
     ]);
   }, [
+    bindProject,
+    current,
     loadConversation,
     loadConversations,
     loadModels,
@@ -648,80 +782,29 @@ export function ChatApp({ current, currentName, recent }: ChatAppProps) {
           <div className="flex items-baseline gap-2">
             <span className="font-semibold text-sm">myWiki</span>
             <span className="text-muted-foreground text-xs">
-              {basename(current)}
+              {currentName ?? basename(current)}
             </span>
           </div>
         </div>
         <div className="flex items-center gap-0.5">
-          <TooltipIconButton
-            tooltip="New chat"
-            onClick={() => void handleNewChat()}
-            disabled={!hasMessages || actionLoading || chatLoading}
-          >
-            <SquarePenIcon className="size-4" />
-          </TooltipIconButton>
-          <DropdownMenu
-            onOpenChange={(open) => open && void loadConversations()}
-          >
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="size-8"
-                title="History"
-                disabled={chatLoading}
+          {/* With the sidebar open, both of these sit at its top; here they
+              only cover the collapsed case. The toggle lives among the
+              actions rather than beside the logo: next to the mark, its
+              panel glyph read as a second logo. */}
+          {!sidebarOpen ? (
+            <>
+              <TooltipIconButton tooltip="Show chats" onClick={toggleSidebar}>
+                <PanelLeftIcon className="size-4" />
+              </TooltipIconButton>
+              <TooltipIconButton
+                tooltip="New chat"
+                onClick={() => void handleNewChat()}
+                disabled={!hasMessages || actionLoading || chatLoading}
               >
-                <HistoryIcon className="size-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-80">
-              <DropdownMenuLabel className="text-xs">History</DropdownMenuLabel>
-              {conversations.length === 0 ? (
-                <div className="px-2 py-3 text-center text-muted-foreground text-xs">
-                  Past conversations appear here.
-                </div>
-              ) : (
-                conversations.map((entry) => (
-                  <DropdownMenuItem
-                    key={entry.id}
-                    className="group/item flex items-start gap-2"
-                    onSelect={() => {
-                      if (entry.id !== activeConversation?.id) {
-                        void switchConversation(entry.id);
-                      }
-                    }}
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div
-                        className={`truncate text-sm ${entry.id === activeConversation?.id ? "font-medium" : ""}`}
-                      >
-                        {entry.title ?? "Untitled conversation"}
-                      </div>
-                      <div className="text-muted-foreground text-xs">
-                        {formatConversationDate(entry.updatedAt)} ·{" "}
-                        {Math.ceil(entry.messageCount / 2)} question
-                        {entry.messageCount > 2 ? "s" : ""}
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      className="rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover/item:opacity-100"
-                      title="Delete conversation"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        void handleDeleteConversation(
-                          entry.id,
-                          entry.title ?? "Untitled conversation",
-                        );
-                      }}
-                    >
-                      <Trash2Icon className="size-3.5" />
-                    </button>
-                  </DropdownMenuItem>
-                ))
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
+                <SquarePenIcon className="size-4" />
+              </TooltipIconButton>
+            </>
+          ) : null}
           <Button
             variant="ghost"
             size="sm"
@@ -835,84 +918,99 @@ export function ChatApp({ current, currentName, recent }: ChatAppProps) {
         </div>
       </header>
 
-      {hasMessages ? (
-        <>
-          <div ref={scrollerRef} className="min-h-0 flex-1 overflow-y-auto">
-            <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-6">
-              {messages.map((message) =>
-                message.role === "user" ? (
-                  <div
-                    key={message.id}
-                    className="ml-auto max-w-[85%] whitespace-pre-wrap rounded-2xl bg-muted px-4 py-2.5 text-sm leading-6"
-                  >
-                    {message.content}
-                  </div>
-                ) : (
-                  <div key={message.id} className="group max-w-full">
-                    {message.content ? (
-                      <AiMarkdown content={message.content} />
-                    ) : null}
-                    {message.error ? (
-                      <div className="mt-2 flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-destructive text-sm">
-                        <TriangleAlertIcon className="mt-0.5 size-4 shrink-0" />
-                        <span>{message.error}</span>
+      <div className="relative flex min-h-0 flex-1">
+        <ChatSidebar
+          open={sidebarOpen}
+          onToggle={toggleSidebar}
+          conversations={conversations}
+          activeId={activeConversation?.id}
+          canStartNew={hasMessages}
+          busy={actionLoading || chatLoading}
+          onNew={() => void handleNewChat()}
+          onSwitch={(id) => void switchConversation(id)}
+          onDelete={(id, title) => void handleDeleteConversation(id, title)}
+        />
+        <div className="relative flex min-h-0 flex-1 flex-col">
+          {hasMessages ? (
+            <>
+              <div ref={scrollerRef} className="min-h-0 flex-1 overflow-y-auto">
+                <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-6">
+                  {messages.map((message) =>
+                    message.role === "user" ? (
+                      <div
+                        key={message.id}
+                        className="ml-auto max-w-[85%] whitespace-pre-wrap rounded-2xl bg-muted px-4 py-2.5 text-sm leading-6"
+                      >
+                        {message.content}
                       </div>
-                    ) : null}
-                    {message.citations && message.citations.length > 0 ? (
-                      <div className="mt-3 flex flex-wrap gap-1.5">
-                        {message.citations.map((citation, index) => (
-                          <a
-                            key={`${citation.sourceId}-${citation.page}-${index}`}
-                            href={`/api/ai/sources/${citation.sourceId}/file#page=${citation.page}`}
-                            target="_blank"
-                            rel="noreferrer"
-                            title={`Verified quote: "${citation.quote}"`}
-                            className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                          >
-                            <ShieldCheckIcon className="size-3 text-green-600 dark:text-green-400" />
-                            {sourceNameById.get(citation.sourceId) ??
-                              "Unknown source"}
-                            {" · p."}
-                            {citation.page}
-                          </a>
-                        ))}
+                    ) : (
+                      <div key={message.id} className="group max-w-full">
+                        {message.content ? (
+                          <AiMarkdown content={message.content} />
+                        ) : null}
+                        {message.error ? (
+                          <div className="mt-2 flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-destructive text-sm">
+                            <TriangleAlertIcon className="mt-0.5 size-4 shrink-0" />
+                            <span>{message.error}</span>
+                          </div>
+                        ) : null}
+                        {message.citations && message.citations.length > 0 ? (
+                          <div className="mt-3 flex flex-wrap gap-1.5">
+                            {message.citations.map((citation, index) => (
+                              <a
+                                key={`${citation.sourceId}-${citation.page}-${index}`}
+                                href={`/api/ai/sources/${citation.sourceId}/file#page=${citation.page}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                title={`Verified quote: "${citation.quote}"`}
+                                className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                              >
+                                <ShieldCheckIcon className="size-3 text-green-600 dark:text-green-400" />
+                                {sourceNameById.get(citation.sourceId) ??
+                                  "Unknown source"}
+                                {" · p."}
+                                {citation.page}
+                              </a>
+                            ))}
+                          </div>
+                        ) : null}
+                        {message.content && !chatLoading ? (
+                          <AnswerActions message={message} />
+                        ) : null}
                       </div>
-                    ) : null}
-                    {message.content && !chatLoading ? (
-                      <AnswerActions message={message} />
-                    ) : null}
-                  </div>
-                ),
-              )}
-              {isTurnRunning ? <ThinkingIndicator /> : null}
-            </div>
-          </div>
-          {/* pb-9 instead of pb-4: the extra strip is what keeps RepoLink out
+                    ),
+                  )}
+                  {isTurnRunning ? <ThinkingIndicator /> : null}
+                </div>
+              </div>
+              {/* pb-9 instead of pb-4: the extra strip is what keeps RepoLink out
               of the composer on narrow windows, where the input runs the full
               width and would otherwise sit under the icon. */}
-          <div className="shrink-0 px-4 pb-9">
-            <div className="mx-auto w-full max-w-3xl">{composer}</div>
-          </div>
-        </>
-      ) : (
-        <div className="flex min-h-0 flex-1 items-center justify-center px-4">
-          <div className="w-full max-w-2xl space-y-6 pb-24">
-            <div className="space-y-1.5 text-center">
-              <h1 className="font-semibold text-2xl tracking-tight">
-                What do you want to know?
-              </h1>
-              <p className="text-muted-foreground text-sm">
-                {sources.length > 0
-                  ? `Answers drawn from your ${sources.length} source${sources.length === 1 ? "" : "s"} — ${tagline ?? DEFAULT_TAGLINE_TAIL}`
-                  : "Add sources to give myWiki something to know, or just ask away."}
-              </p>
+              <div className="shrink-0 px-4 pb-9">
+                <div className="mx-auto w-full max-w-3xl">{composer}</div>
+              </div>
+            </>
+          ) : (
+            <div className="flex min-h-0 flex-1 items-center justify-center px-4">
+              <div className="w-full max-w-2xl space-y-6 pb-24">
+                <div className="space-y-1.5 text-center">
+                  <h1 className="font-semibold text-2xl tracking-tight">
+                    What do you want to know?
+                  </h1>
+                  <p className="text-muted-foreground text-sm">
+                    {sources.length > 0
+                      ? `Answers drawn from your ${sources.length} source${sources.length === 1 ? "" : "s"} — ${tagline ?? DEFAULT_TAGLINE_TAIL}`
+                      : "Add sources to give myWiki something to know, or just ask away."}
+                  </p>
+                </div>
+                {composer}
+              </div>
             </div>
-            {composer}
-          </div>
-        </div>
-      )}
+          )}
 
-      <RepoLink />
+          <RepoLink />
+        </div>
+      </div>
 
       <SourcesDialog open={sourcesOpen} onOpenChange={setSourcesOpen} />
       <RenameKbDialog
