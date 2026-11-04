@@ -466,7 +466,7 @@ function ChatSidebar({
  *
  * The URL comes from package.json's `repository` field rather than a literal,
  * so a fork or a rename can't leave this pointing at the wrong repo. The
- * composer above reserves room for it (see the pb-9 wrapper), which is why
+ * composer above reserves room for it (see the pb-12 wrapper), which is why
  * this can be absolutely positioned without ever landing on the input.
  */
 function RepoLink() {
@@ -478,8 +478,9 @@ function RepoLink() {
       title="myWiki on GitHub"
       className="absolute bottom-3 left-3 text-muted-foreground transition-colors hover:text-foreground"
     >
-      {/* Without an explicit currentColor the pack paints its brand colour. */}
-      <SiGithub className="size-4" color="currentColor" />
+      {/* Without an explicit currentColor the pack paints its brand colour.
+          size-8 matches the myWiki mark in the header's corner. */}
+      <SiGithub className="size-8" color="currentColor" />
       <span className="sr-only">myWiki on GitHub</span>
     </a>
   );
@@ -774,9 +775,11 @@ export function ChatApp({ current, currentName, recent }: ChatAppProps) {
 
   return (
     <div className="relative flex h-full flex-col bg-background">
-      <header className="flex h-12 shrink-0 items-center justify-between border-b px-3">
-        <div className="flex items-center gap-2">
-          <MyWikiLogo className="size-5 shrink-0" />
+      {/* h-14, not h-12: the 32px mark needs the room. Same size as the
+          repo mark in the bottom-left corner, so the two corners match. */}
+      <header className="flex h-14 shrink-0 items-center justify-between border-b px-3">
+        <div className="flex items-center gap-2.5">
+          <MyWikiLogo className="size-8 shrink-0" />
           {/* The two labels keep their own baseline row, so adding the mark
               above doesn't push the folder name off the wordmark's baseline. */}
           <div className="flex items-baseline gap-2">
@@ -983,10 +986,11 @@ export function ChatApp({ current, currentName, recent }: ChatAppProps) {
                   {isTurnRunning ? <ThinkingIndicator /> : null}
                 </div>
               </div>
-              {/* pb-9 instead of pb-4: the extra strip is what keeps RepoLink out
-              of the composer on narrow windows, where the input runs the full
-              width and would otherwise sit under the icon. */}
-              <div className="shrink-0 px-4 pb-9">
+              {/* pb-12 instead of pb-4: the extra strip is what keeps RepoLink
+              (32px, 12px off the bottom) out of the composer on narrow
+              windows, where the input runs the full width and would
+              otherwise sit under the icon. */}
+              <div className="shrink-0 px-4 pb-12">
                 <div className="mx-auto w-full max-w-3xl">{composer}</div>
               </div>
             </>
